@@ -1,0 +1,9 @@
+{
+  "name": "Labflow ",
+  "description": "my version",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

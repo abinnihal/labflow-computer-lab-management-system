@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Labflow - Lab Scheduling System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            slate: {
+              850: '#1e293b', // Custom dark shade if needed
+              950: '#020617',
+            },
+            brand: {
+              green: '#2563eb', // Changed to Royal Blue for a mature, professional look
+              dark: '#020617',  // Slate 950
+              card: '#0f172a',  // Slate 900
+              border: '#1e293b', // Slate 800
+              accent: '#3b82f6'  // Blue 500
+            }
+          },
+          animation: {
+            'marquee': 'marquee 30s linear infinite',
+            'blob': 'blob 7s infinite',
+          },
+          keyframes: {
+            marquee: {
+              '0%': { transform: 'translateX(0%)' },
+              '100%': { transform: 'translateX(-100%)' },
+            },
+            blob: {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+              '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+              '100%': { transform: 'translate(0px, 0px) scale(1)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <style>
+    :root {
+      --transDur: 0.3s;
+      --primary: #2563eb;
+      --primaryT: rgba(37, 99, 235, 0.3);
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+
+    /* Custom scrollbar for better aesthetics - Dark Mode Compatible */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Dark mode scrollbar overrides */
+    .dark ::-webkit-scrollbar-thumb {
+      background: #475569;
+    }
+
+    .dark ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+
+    .animate-fade-in-up {
+      animation: fadeInUp 0.5s ease-out;
+    }
+
+    .animate-fade-in-down {
+      animation: fadeInDown 0.3s ease-out;
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes fadeInDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Jumping Dots Loader CSS (From Uiverse.io by coding-masala) */
+    .loader {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100px;
+    }
+
+    .box {
+      width: 20px;
+      height: 20px;
+      margin: 0 8px;
+      border-radius: 50%;
+      animation: jump_4123 1s ease-in-out infinite;
+    }
+
+    .box:nth-child(1) {
+      background-color: #4e4e4e;
+      animation-delay: 0.2s;
+    }
+
+    .dark .box:nth-child(1) {
+      background-color: #94a3b8;
+      /* Light slate for dark mode */
+    }
+
+    .box:nth-child(2) {
+      background-color: #bdbdbd;
+      animation-delay: 0.4s;
+    }
+
+    .dark .box:nth-child(2) {
+      background-color: #475569;
+      /* Darker slate for dark mode */
+    }
+
+    .box:nth-child(3) {
+      background-color: #4e4e4e;
+      animation-delay: 0.6s;
+    }
+
+    .dark .box:nth-child(3) {
+      background-color: #94a3b8;
+    }
+
+    .box:nth-child(4) {
+      background-color: #bdbdbd;
+      animation-delay: 0.8s;
+    }
+
+    .dark .box:nth-child(4) {
+      background-color: #475569;
+    }
+
+    @keyframes jump_4123 {
+
+      0%,
+      100% {
+        transform: translateY(0);
+      }
+
+      50% {
+        transform: translateY(-30px);
+      }
+    }
+
+    /* Customized Dark Mode Toggle */
+    .toggle {
+      background-color: #ffffff;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      border: 1px solid #e2e8f0;
+      /* Added subtle border for light mode visibility */
+      line-height: 1;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s ease, background-color 0.3s ease, border-color 0.3s ease;
+    }
+
+    .toggle:hover {
+      transform: scale(1.05);
+      /* Added hover interaction */
+    }
+
+    /* Dark mode override for toggle background */
+    .dark .toggle {
+      background-color: #334155;
+      /* Slate 700 - Better contrast on dark headers */
+      border-color: #475569;
+      /* Slate 600 */
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    .input {
+      display: none;
+    }
+
+    .icon {
+      grid-column: 1 / 1;
+      grid-row: 1 / 1;
+      transition: transform 500ms;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .icon--moon {
+      transition-delay: 200ms;
+      color: #475569;
+      /* Slate 600 */
+    }
+
+    .icon--sun {
+      transform: scale(0);
+      color: #fbbf24;
+      /* Amber 400 */
+    }
+
+    /* Using a class selector for checked state to avoid ID conflicts */
+    .switch-input:checked+.icon--moon {
+      transform: rotate(360deg) scale(0);
+    }
+
+    .switch-input:checked~.icon--sun {
+      transition-delay: 200ms;
+      transform: scale(1) rotate(360deg);
+    }
+
+    /* Notification Icon Swap Style (From Uiverse.io by elijahgummer) */
+    .notification-icon-uiverse {
+      font-size: 24px;
+      /* Scaled down from 48px to fit header */
+      cursor: pointer;
+      user-select: none;
+      display: inline-block;
+      transition: transform 0.2s ease;
+    }
+
+    .notification-icon-uiverse:after {
+      content: attr(data-content);
+    }
+
+    .notification-icon-uiverse:hover:after {
+      content: attr(data-hover-content);
+    }
+
+    .notification-icon-uiverse:active:after {
+      content: attr(data-active-content);
+    }
+
+    .notification-icon-uiverse:hover {
+      transform: scale(1.1);
+    }
+  </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.9.6",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.0",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+
+<body class="bg-gray-100 dark:bg-gray-900 text-slate-800 dark:text-slate-100 transition-colors duration-200">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
+</html>

@@ -2,9 +2,16 @@ import React from 'react';
 
 const Marquee: React.FC = () => {
     const stack = [
-        "React / Next.js", "Node.js", "Express", "NestJS", "MongoDB", "PostgreSQL",
-        "Tailwind CSS", "Google Calendar API", "Outlook API", "WhatsApp API", "OpenAI", "Google Gemini"
+        "Google Firebase",
+        "React (Vite)",
+        "TypeScript",
+        "Firebase Authentication",
+        "Firestore Database",
+        "Tailwind CSS",
+        "React Router",
+        "Lucide Icons",
     ];
+
 
     return (
         <div className="py-20 overflow-hidden bg-brand-dark relative z-20 border-y border-white/5">
@@ -17,12 +24,17 @@ const Marquee: React.FC = () => {
                 </span>
             </div>
 
-            <div className="whitespace-nowrap animate-marquee flex items-center gap-16">
-                {[...stack, ...stack].map((item, i) => (
-                    <span key={i} className="text-3xl md:text-5xl font-bold text-white/10 hover:text-brand-green/50 transition-colors leading-none uppercase tracking-tighter">
-                        {item}
-                    </span>
-                ))}
+            <div className="overflow-hidden">
+                <div className="flex w-max animate-marquee items-center">
+                    {[...stack, ...stack].map((item, i) => (
+                        <span
+                            key={i}
+                            className="px-8 text-3xl md:text-5xl font-bold text-white/10 hover:text-brand-green/50 transition-colors leading-none uppercase tracking-tighter"
+                        >
+                            {item}
+                        </span>
+                    ))}
+                </div>
             </div>
         </div>
     );

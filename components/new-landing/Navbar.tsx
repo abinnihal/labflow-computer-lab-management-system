@@ -19,12 +19,16 @@ const Navbar: React.FC = () => {
             }`}>
             <div className="container mx-auto px-4 flex items-center justify-between">
                 {/* Logo */}
-                <div className="flex items-center gap-2 font-bold text-2xl tracking-tighter cursor-pointer" onClick={() => window.scrollTo(0, 0)}>
-                    <div className="w-8 h-8 flex items-center justify-center">
-                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                            <path d="M6 5V17C6 19.2091 7.79086 21 10 21H18" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M13 3H17C19.2091 3 21 4.79086 21 7V13" stroke="#60a5fa" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
+                <div
+                    className="flex items-center gap-2 font-bold text-2xl tracking-tighter cursor-pointer"
+                    onClick={() => window.scrollTo(0, 0)}
+                >
+                    <div className="w-14 h-14 flex items-center justify-center">
+                        <img
+                            src="/logo.png"
+                            alt="Labflow logo"
+                            className="w-full h-full object-contain"
+                        />
                     </div>
                     <span className="text-white">Labflow</span>
                 </div>

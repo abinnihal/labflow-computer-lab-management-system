@@ -1,78 +1,98 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../../types';
 import { toggleUserBan, isUserBanned, getBannedWords, addBannedWord, removeBannedWord } from '../../services/communityService';
 import { getAllUsers } from '../../services/userService';
+import { Terminal } from 'lucide-react';
 
 interface Props {
-  user: User;
+   user: User;
 }
 
 const ConsoleModerationPage: React.FC<Props> = ({ user }) => {
-  // Moderation State
-  const [bannedWords, setBannedWords] = useState<string[]>([]);
-  const [newWord, setNewWord] = useState('');
-  const [students, setStudents] = useState<User[]>([]);
-  const [bannedUserIds, setBannedUserIds] = useState<Set<string>>(new Set());
+   // Moderation State
+   const [bannedWords, setBannedWords] = useState<string[]>([]);
+   const [newWord, setNewWord] = useState('');
+   const [students, setStudents] = useState<User[]>([]);
+   const [bannedUserIds, setBannedUserIds] = useState<Set<string>>(new Set());
+   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    refreshModerationData();
-  }, []);
+   useEffect(() => {
+      refreshModerationData();
+   }, []);
 
-  const refreshModerationData = () => {
-    setBannedWords(getBannedWords());
-    
-    // Fetch actual students from service
-    const allUsers = getAllUsers();
-    const studentUsers = allUsers.filter(u => u.role === UserRole.STUDENT);
-    setStudents(studentUsers);
+   const refreshModerationData = async () => {
+      try {
+         // 1. Fetch Words (Assuming this is still sync, if not, add await)
+         setBannedWords(getBannedWords());
 
-    // Sync local banned state with service
-    const banned = new Set<string>();
-    studentUsers.forEach(s => {
-       if (isUserBanned(s.id)) banned.add(s.id);
-    });
-    setBannedUserIds(banned);
-  };
+         // 2. Fetch Users Async from Firestore
+         const allUsers = await getAllUsers();
 
-  const handleBanToggle = (userId: string) => {
-     toggleUserBan(userId);
-     refreshModerationData();
-  };
+         // 3. Filter for Students
+         const studentUsers = allUsers.filter(u => u.role === UserRole.STUDENT);
+         setStudents(studentUsers);
 
-  const handleAddWord = () => {
-     if (newWord.trim()) {
-        addBannedWord(newWord.trim());
-        setNewWord('');
-        refreshModerationData();
-     }
-  };
+         // 4. Sync local banned state
+         const banned = new Set<string>();
+         studentUsers.forEach(s => {
+            if (isUserBanned(s.id)) banned.add(s.id);
+         });
+         setBannedUserIds(banned);
+      } catch (error) {
+         console.error("Failed to load moderation data:", error);
+      } finally {
+         setIsLoading(false);
+      }
+   };
 
-  const handleRemoveWord = (word: string) => {
-     removeBannedWord(word);
-     refreshModerationData();
-  };
+   const handleBanToggle = (userId: string) => {
+      toggleUserBan(userId);
+      // Re-fetch to update UI (or optimistic update)
+      refreshModerationData();
+   };
 
-  return (
-    <div className="space-y-6">
-       <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Console Moderation</h1>
-          <p className="text-slate-500 dark:text-slate-400">Manage community chat permissions and content filters.</p>
-       </div>
+   const handleAddWord = () => {
+      if (newWord.trim()) {
+         addBannedWord(newWord.trim());
+         setNewWord('');
+         refreshModerationData();
+      }
+   };
 
-       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+   const handleRemoveWord = (word: string) => {
+      removeBannedWord(word);
+      refreshModerationData();
+   };
+
+   if (isLoading) {
+      return (
+         <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <span className="ml-3 text-slate-500">Loading moderation data...</span>
+         </div>
+      );
+   }
+
+   return (
+      <div className="space-y-6">
+         <div>
+            <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Console Moderation</h1>
+            <p className="text-slate-500 dark:text-slate-400">Manage community chat permissions and content filters.</p>
+         </div>
+
+         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* User Moderation */}
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors">
                <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
                   <h3 className="font-bold text-slate-800 dark:text-white">Student Chat Permissions</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">Ban users from posting or commenting in the Learner's Console.</p>
                </div>
-               <div className="divide-y divide-slate-100 dark:divide-slate-700">
+               <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-[500px] overflow-y-auto">
                   {students.map(student => (
                      <div key={student.id} className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                         <div className="flex items-center gap-3">
                            <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
-                              {student.name.charAt(0)}
+                              {student.name ? student.name.charAt(0) : '?'}
                            </div>
                            <div>
                               <p className="font-semibold text-slate-800 dark:text-slate-200 text-sm">{student.name}</p>
@@ -85,44 +105,44 @@ const ConsoleModerationPage: React.FC<Props> = ({ user }) => {
                            ) : (
                               <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 px-2 py-0.5 rounded font-bold uppercase">Active</span>
                            )}
-                           <button 
-                             onClick={() => handleBanToggle(student.id)}
-                             className={`ml-2 px-3 py-1 rounded text-xs font-bold transition-colors ${bannedUserIds.has(student.id) ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30'}`}
+                           <button
+                              onClick={() => handleBanToggle(student.id)}
+                              className={`ml-2 px-3 py-1 rounded text-xs font-bold transition-colors ${bannedUserIds.has(student.id) ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30'}`}
                            >
-                             {bannedUserIds.has(student.id) ? 'UNBAN' : 'BAN / KICK'}
+                              {bannedUserIds.has(student.id) ? 'UNBAN' : 'BAN'}
                            </button>
                         </div>
                      </div>
                   ))}
                   {students.length === 0 && (
-                      <div className="p-8 text-center text-slate-400 dark:text-slate-500 italic">
-                          No students available to moderate.
-                      </div>
+                     <div className="p-8 text-center text-slate-400 dark:text-slate-500 italic">
+                        No students available to moderate.
+                     </div>
                   )}
                </div>
             </div>
 
             {/* Word Filter */}
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors h-fit">
                <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
                   <h3 className="font-bold text-slate-800 dark:text-white">Profanity Filter</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">Manage banned words. Content containing these will be auto-blocked.</p>
                </div>
                <div className="p-5">
                   <div className="flex gap-2 mb-4">
-                     <input 
-                       type="text" 
-                       value={newWord}
-                       onChange={(e) => setNewWord(e.target.value)}
-                       placeholder="Add word to ban..." 
-                       className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-700 dark:text-white"
+                     <input
+                        type="text"
+                        value={newWord}
+                        onChange={(e) => setNewWord(e.target.value)}
+                        placeholder="Add word to ban..."
+                        className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-700 dark:text-white"
                      />
-                     <button 
-                       onClick={handleAddWord}
-                       disabled={!newWord.trim()}
-                       className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50"
+                     <button
+                        onClick={handleAddWord}
+                        disabled={!newWord.trim()}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50"
                      >
-                       Add
+                        Add
                      </button>
                   </div>
 
@@ -140,8 +160,8 @@ const ConsoleModerationPage: React.FC<Props> = ({ user }) => {
                </div>
             </div>
          </div>
-    </div>
-  );
+      </div>
+   );
 };
 
 export default ConsoleModerationPage;

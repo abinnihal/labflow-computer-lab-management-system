@@ -6,24 +6,6 @@ import { loginWithEmail } from './auth';
 import { createUserProfile, getUserProfile } from './users';
 
 
-// Internal Credential Store
-interface Credential {
-  email: string;
-  password: string;
-  role: UserRole;
-}
-
-/*
-let CREDENTIALS: Credential[] = [
-// Demo Student
-{ email: '1', password: '123', role: UserRole.STUDENT },
-// Demo Faculty
-{ email: '2', password: '123', role: UserRole.FACULTY },
-// Default Admin
-{ email: 'admin@123', password: '123', role: UserRole.ADMIN }
-];
-*/
-
 // Initial User Store
 let USERS: User[] = [
   CURRENT_USER_MOCK_ADMIN,
@@ -51,20 +33,6 @@ export const getPendingUsersByRole = (role: UserRole, department?: string, manag
   return pending;
 };
 
-/*
-export const authenticateUser = (email: string, password: string, role?: UserRole): User | null => {
-const cred = CREDENTIALS.find(c => c.email === email && c.password === password);
-
-if (cred) {
-  if (role && cred.role !== role && cred.role !== UserRole.ADMIN) {
-    return null;
-  }
-  const user = USERS.find(u => u.email === cred.email);
-  return user || null;
-}
-return null;
-};
-*/
 
 //firebase authentication
 export const authenticateUser = async (
@@ -117,44 +85,7 @@ export const registerUser = async (
   return newUser;
 };
 
-/*
-export const registerUser = (user: Omit<User, 'id' | 'status'>, password: string): User => {
-const initialStatus = 'PENDING';
 
-// Ensure department is set for students if not provided (defaulting for logic consistency in demo)
-const userWithDept = {
-  ...user,
-  department: user.department || 'Computer Science'
-};
-
-const newUser: User = {
-  ...userWithDept,
-  id: `u-${Date.now()}`,
-  status: initialStatus,
-  registrationDate: new Date().toISOString(),
-  idProofUrl: user.idProofUrl || `https://ui-avatars.com/api/?name=${user.name}&background=random`
-};
-
-USERS.push(newUser);
-CREDENTIALS.push({
-  email: user.email,
-  password: password,
-  role: user.role
-});
-
-// Notify Admins about Faculty reg, or Faculty about Student reg
-if (user.role === UserRole.FACULTY) {
-  sendNotification('SYSTEM', 'ADMIN_GROUP', `New Faculty Registration: ${user.name}`, 'INFO');
-} else {
-  // In real app, find Faculty for this department. Here we just mock sending to demo faculty.
-  // Logic relies on department matching later in dashboard.
-  sendNotification('SYSTEM', 'f-demo', `New Student Registration: ${user.name} (${user.course})`, 'INFO');
-}
-
-return newUser;
-};
-
-*/
 
 export const updateUserStatus = (userId: string, status: 'APPROVED' | 'REJECTED' | 'DEACTIVATED' | 'PENDING'): void => {
   const user = USERS.find(u => u.id === userId);
@@ -213,13 +144,7 @@ export const importUsersFromCSV = (csvContent: string): number => {
         status: 'APPROVED'
       });
 
-      /*
-      CREDENTIALS.push({
-        email: email.trim(),
-        password: 'password',
-        role: roleStr?.trim().toUpperCase() === 'FACULTY' ? UserRole.FACULTY : UserRole.STUDENT
-      });
-      */
+
 
       count++;
     }

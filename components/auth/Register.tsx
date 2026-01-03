@@ -100,7 +100,19 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
 
       try {
         // 1️⃣ Create Firebase Auth user
-        const fbUser = await registerWithEmail(formData.email, formData.password);
+        const fbUser = await registerWithEmail(
+          formData.email,
+          formData.password,
+          role === 'STUDENT' ? 'student' : 'faculty',
+          {
+            name: formData.fullName,
+            department:
+              role === 'FACULTY'
+                ? formData.department
+                : 'Computer Science'
+          }
+        );
+
 
         // 2️⃣ Create Firestore profile (PENDING by default)
         const firestoreRole =

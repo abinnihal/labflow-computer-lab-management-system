@@ -1,9 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { UserRole } from '../../types';
-import { registerWithEmail } from '../../services/auth';
-import { createUserProfile } from '../../services/users';
+import { registerWithEmail } from '../../services/auth'; // Only use auth service
 import TerminalLoader from '../ui/TerminalLoader';
 import ThemeToggle from '../ui/ThemeToggle';
 import Logo from '../ui/Logo';
@@ -20,7 +17,7 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
   const [role, setRole] = useState<'STUDENT' | 'FACULTY'>('STUDENT');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isSuccess, setIsSuccess] = useState(false); // Success message state
+  const [isSuccess, setIsSuccess] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -29,11 +26,9 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
     email: '',
     password: '',
     confirmPassword: '',
-    // Student specific
     studentId: '',
     course: 'BCA',
     semester: '1st',
-    // Faculty specific
     facultyId: '',
     department: '',
   });
@@ -41,21 +36,19 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const roleParam = params.get('role');
-    if (roleParam === 'FACULTY') {
-      setRole('FACULTY');
-    } else if (roleParam === 'STUDENT') {
-      setRole('STUDENT');
-    }
+    if (roleParam === 'FACULTY') setRole('FACULTY');
+    else if (roleParam === 'STUDENT') setRole('STUDENT');
   }, [location]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = () => {
+  // ✅ FIXED: Single async function handles the submission
+  const handleSubmit = async () => {
     setError('');
 
-    // Validation
+    // --- 1. Validation ---
     if (!formData.fullName || !formData.email || !formData.password || !formData.phone) {
       setError('Please fill in all required fields.');
       return;
@@ -75,68 +68,31 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
 
     setIsLoading(true);
 
-    const handleSubmit = async () => {
-      setError('');
+    try {
+      // --- 2. Registration Logic ---
+      // This calls auth.ts, which creates the User in Auth AND the Document in Firestore
+      await registerWithEmail(
+        formData.email,
+        formData.password,
+        role === 'STUDENT' ? 'student' : 'faculty',
+        {
+          name: formData.fullName,
+          department: role === 'FACULTY' ? formData.department : formData.course
+        }
+      );
 
-      // Validation (KEEP AS IS)
-      if (!formData.fullName || !formData.email || !formData.password || !formData.phone) {
-        setError('Please fill in all required fields.');
-        return;
-      }
-      if (formData.password !== formData.confirmPassword) {
-        setError('Passwords do not match.');
-        return;
-      }
-      if (role === 'STUDENT' && (!formData.studentId || !formData.course)) {
-        setError('Please provide Student ID and Course details.');
-        return;
-      }
-      if (role === 'FACULTY' && (!formData.facultyId || !formData.department)) {
-        setError('Please provide Faculty ID and Department details.');
-        return;
-      }
-
-      setIsLoading(true);
-
-      try {
-        // 1️⃣ Create Firebase Auth user
-        const fbUser = await registerWithEmail(
-          formData.email,
-          formData.password,
-          role === 'STUDENT' ? 'student' : 'faculty',
-          {
-            name: formData.fullName,
-            department:
-              role === 'FACULTY'
-                ? formData.department
-                : 'Computer Science'
-          }
-        );
-
-
-        // 2️⃣ Create Firestore profile (PENDING by default)
-        const firestoreRole =
-          role === 'STUDENT' ? 'student' : 'faculty';
-
-        await createUserProfile(
-          fbUser.uid,
-          firestoreRole,
-          formData.fullName
-        );
-
-
-        setIsSuccess(true);
-      } catch (err: any) {
-        setError(err.message || 'Registration failed. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      // --- 3. Success State ---
+      setIsSuccess(true);
+    } catch (err: any) {
+      console.error("Registration Error:", err);
+      setError(err.message || 'Registration failed. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 transition-colors duration-300 relative">
-      {/* Theme Toggle */}
       <div className="absolute top-6 right-6 z-50">
         <ThemeToggle isDarkMode={isDarkMode} toggleTheme={toggleTheme} />
       </div>
@@ -154,12 +110,9 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
             </div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Registration Request Sent</h2>
             <p className="text-slate-600 dark:text-slate-400 mb-6">
-              Your {role === 'STUDENT' ? 'student' : 'faculty'} account has been created and is currently <b>pending approval</b> from the {role === 'STUDENT' ? 'Faculty' : 'Administrator'}. You will be notified via email once your account is active.
+              Your account has been created and is <b>pending approval</b>. You will be notified once active.
             </p>
-            <Link
-              to="/login"
-              className="block w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-colors shadow-md"
-            >
+            <Link to="/login" className="block w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-colors shadow-md">
               Back to Login
             </Link>
           </div>
@@ -171,9 +124,7 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
               <Logo className="w-16 h-16" textClassName="text-3xl" />
             </div>
             <h2 className="mt-2 text-center text-3xl font-extrabold text-slate-900 dark:text-white">Create your account</h2>
-            <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-400">
-              Join Labflow as {role === 'STUDENT' ? 'a Student' : 'Faculty'}
-            </p>
+            <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-400">Join Labflow as {role === 'STUDENT' ? 'a Student' : 'Faculty'}</p>
           </div>
 
           <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-lg">
@@ -194,17 +145,17 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Full Name</label>
-                    <input name="fullName" value={formData.fullName} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="John Doe" />
+                    <input name="fullName" value={formData.fullName} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg" placeholder="John Doe" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Phone</label>
-                    <input name="phone" value={formData.phone} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="+1 234..." />
+                    <input name="phone" value={formData.phone} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg" placeholder="+1 234..." />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Email Address</label>
-                  <input name="email" value={formData.email} onChange={handleChange} type="email" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="you@college.edu" />
+                  <input name="email" value={formData.email} onChange={handleChange} type="email" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg" placeholder="you@college.edu" />
                 </div>
 
                 {role === 'STUDENT' ? (

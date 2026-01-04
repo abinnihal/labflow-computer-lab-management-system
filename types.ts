@@ -1,31 +1,46 @@
-
 export enum UserRole {
   ADMIN = 'ADMIN',
   FACULTY = 'FACULTY',
   STUDENT = 'STUDENT'
 }
 
-export type PermissionLevel = 'READ' | 'WRITE' | 'NONE';
+// Global Status Type for consistency
+export type UserStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'DEACTIVATED';
+
+// Updated Permission Levels to include ADMIN capability
+export type PermissionLevel = 'READ' | 'WRITE' | 'ADMIN' | 'NONE';
 
 export interface User {
+  // --- Common Fields (All Users) ---
   id: string;
   name: string;
   email: string;
   role: UserRole;
+  status: UserStatus;
   avatarUrl?: string;
-  department?: string;
-  programType?: 'UG' | 'PG' | 'PHD' | 'BOTH'; // Added for UG/PG selection
-  course?: string;
-  semester?: string;
-  studentId?: string;
-  facultyId?: string;
   phone?: string;
-  status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'DEACTIVATED';
-  permissions?: Record<string, PermissionLevel>; // e.g., { 'CALENDAR': 'WRITE' }
+  department?: string;
+  createdAt?: string; // Firestore Timestamp converted to ISO string
+  lastLogin?: string;
+
+  // --- Student Specific Fields ---
+  studentId?: string;       // College Roll No (e.g., "BCA22055")
+  programType?: 'UG' | 'PG' | 'PHD' | 'BOTH';
+  course?: string;          // e.g., "B.Tech CSE"
+  semester?: string;        // e.g., "S5"
+  batchYear?: string;       // e.g., "2023-2027" (New Field)
+
+  // --- Faculty Specific Fields ---
+  facultyId?: string;       // Employee ID (e.g., "FAC-001")
+  designation?: string;     // e.g., "Assistant Professor" (New Field)
+  managedSemesters?: string[]; // Semesters they oversee (e.g. ["S1", "S3"])
+
+  // --- Admin / Security ---
   idProofUrl?: string;
-  registrationDate?: string;
-  managedSemesters?: string[]; // For Faculty: List of semesters they approve (e.g. ["1st", "3rd"])
+  permissions?: Record<string, PermissionLevel>; // e.g., { 'CALENDAR': 'WRITE' }
 }
+
+// --- REST OF YOUR TYPES (Unchanged) ---
 
 export interface LabInventoryItem {
   id: string;
@@ -77,7 +92,7 @@ export interface BookingLog {
 export interface Booking {
   id: string;
   labId: string;
-  userId: string; // Faculty ID usually
+  userId: string;
   userName: string;
   subject: string;
   startTime: string; // ISO string
@@ -93,16 +108,16 @@ export interface Task {
   id: string;
   title: string;
   description: string;
-  assignedBy: string; // Faculty Name
+  assignedBy: string;
   assignedById: string;
-  course: string; // e.g., "B.Tech CSE"
-  dueDate: string; // YYYY-MM-DD
+  course: string;
+  dueDate: string;
   instructions?: string;
   hints?: string[];
-  questions?: string[]; // Specific questions to answer
-  attachments?: string[]; // Mock URLs
+  questions?: string[];
+  attachments?: string[];
   createdAt: string;
-  status?: string; // Optional status for mock data context (e.g., 'PENDING' | 'SUBMITTED')
+  status?: string;
 }
 
 export interface Submission {
@@ -114,7 +129,7 @@ export interface Submission {
   status: 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
   textResponse?: string;
   codeSnippet?: string;
-  files?: string[]; // Mock file names
+  files?: string[];
   feedback?: string;
 }
 
@@ -139,25 +154,22 @@ export interface Post {
   authorName: string;
   authorRole: UserRole;
   authorAvatar?: string;
-  content: string; // Text content
+  content: string;
   timestamp: string;
   likes: number;
   comments: number;
-  commentsList?: Comment[]; // Array of comments
+  commentsList?: Comment[];
   tags: string[];
   scope: 'CLASS' | 'GLOBAL';
   type: 'TEXT' | 'MEDIA' | 'CODE' | 'POLL' | 'FILE';
-  
-  // Type specific fields
-  mediaUrls?: string[]; // Images/Videos
+  mediaUrls?: string[];
   mediaType?: 'IMAGE' | 'VIDEO';
   codeSnippet?: string;
   codeLanguage?: string;
   pollOptions?: PollOption[];
   fileUrl?: string;
   fileName?: string;
-  
-  isLiked?: boolean; // UI state
+  isLiked?: boolean;
 }
 
 export interface AttendanceLog {
@@ -200,9 +212,9 @@ export interface Feedback {
   labId?: string;
   content: string;
   date: string;
-  rating?: number; // 1-5
+  rating?: number;
   category: 'GENERAL' | 'LAB_ISSUE' | 'TEACHING';
-  target?: 'FACULTY' | 'ADMIN'; // New field to specify recipient
+  target?: 'FACULTY' | 'ADMIN';
   status?: 'PENDING' | 'RESOLVED';
   adminReply?: string;
   isArchived?: boolean;

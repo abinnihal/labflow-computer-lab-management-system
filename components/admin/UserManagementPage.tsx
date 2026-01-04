@@ -1,60 +1,70 @@
-
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, PermissionLevel } from '../../types';
+import { User, UserRole, PermissionLevel, UserStatus } from '../../types';
 import {
     getAllUsers,
     updateUserStatus,
-    deleteUser
+    deleteUser,
+    updateUser
 } from '../../services/userService';
 
-
 interface Props {
-    user: User;
+    user?: User; // Made optional to prevent strict type errors if parent doesn't pass it
 }
 
 const MODULES = ['Calendar', 'Tasks', 'Attendance', 'Community', 'Labs'];
 
-const UserManagementPage: React.FC<Props> = ({ user }) => {
+const UserManagementPage: React.FC<Props> = () => {
+    // --- State ---
     const [filterRole, setFilterRole] = useState<'ALL' | UserRole>('ALL');
-    const [filterStatus, setFilterStatus] = useState<'ALL' | 'APPROVED' | 'PENDING' | 'DEACTIVATED'>('ALL');
+    const [filterStatus, setFilterStatus] = useState<'ALL' | UserStatus>('ALL');
     const [searchTerm, setSearchTerm] = useState('');
+
+    const [users, setUsers] = useState<User[]>([]);
+    const [loading, setLoading] = useState(true);
 
     // Modal State
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editFormData, setEditFormData] = useState<Partial<User>>({});
     const [permissionsData, setPermissionsData] = useState<Record<string, PermissionLevel>>({});
-    const [users, setUsers] = useState<User[]>([]);
-    const [loading, setLoading] = useState(true);
 
     // Toast State
-    const [msg, setMsg] = useState<{ type: 'success' | 'info', text: string } | null>(null);
+    const [msg, setMsg] = useState<{ type: 'success' | 'info' | 'error', text: string } | null>(null);
 
+    // --- Lifecycle ---
     useEffect(() => {
         refreshUsers();
     }, []);
 
-
     const refreshUsers = async () => {
         setLoading(true);
-        const data = await getAllUsers();
-        setUsers(data);
-        setLoading(false);
+        try {
+            const data = await getAllUsers();
+            setUsers(data);
+        } catch (error) {
+            console.error("Failed to fetch users", error);
+        } finally {
+            setLoading(false);
+        }
     };
 
-
-    const showMsg = (type: 'success' | 'info', text: string) => {
+    const showMsg = (type: 'success' | 'info' | 'error', text: string) => {
         setMsg({ type, text });
         setTimeout(() => setMsg(null), 3000);
     };
 
     // --- Handlers ---
 
-    const handleStatusChange = async (userId: string, status: 'APPROVED' | 'REJECTED' | 'DEACTIVATED' | 'PENDING') => {
-        await updateUserStatus(userId, status);
-        await refreshUsers();
-
-        showMsg('success', `User status updated to ${status}`);
+    const handleStatusChange = async (userId: string, status: UserStatus) => {
+        try {
+            await updateUserStatus(userId, status);
+            // Optimistic update locally to feel instant
+            setUsers(prev => prev.map(u => u.id === userId ? { ...u, status } : u));
+            showMsg('success', `User status updated to ${status}`);
+        } catch (error) {
+            showMsg('error', 'Failed to update status');
+            refreshUsers(); // Revert on error
+        }
     };
 
     const handleEditClick = (user: User) => {
@@ -63,63 +73,75 @@ const UserManagementPage: React.FC<Props> = ({ user }) => {
             name: user.name,
             email: user.email,
             role: user.role,
-            department: user.department
+            department: user.department || ''
         });
+        // Ensure permissions object exists
         setPermissionsData(user.permissions || {});
         setIsEditModalOpen(true);
     };
 
-    const handleSaveEdit = () => {
-        showMsg('info', 'Edit feature will be enabled in a future update.');
-        setIsEditModalOpen(false);
-    };
+    const handleSaveEdit = async () => {
+        if (!selectedUser) return;
 
+        try {
+            // 1. Prepare updates
+            const updates: Partial<User> = {
+                ...editFormData,
+                permissions: permissionsData
+            };
 
-    const handleResetPassword = () => {
-        alert('Password reset is handled via Firebase email reset.');
-    };
+            // 2. Send to Firestore
+            await updateUser(selectedUser.id, updates);
 
-
-    const handleDelete = (userId: string) => {
-        if (window.confirm("Are you sure you want to delete this user? This cannot be undone.")) {
-            deleteUser(userId);
-            refreshUsers();
-            showMsg('info', 'User deleted.');
+            // 3. Update UI
+            setUsers(prev => prev.map(u => u.id === selectedUser.id ? { ...u, ...updates } : u));
+            setIsEditModalOpen(false);
+            showMsg('success', 'User details updated successfully');
+        } catch (error) {
+            console.error(error);
+            showMsg('error', 'Failed to save changes');
         }
     };
 
-    const handleImport = () => {
-        showMsg('info', 'CSV import will be added in a future update.');
-    };
-
-    const handleExport = () => {
-        showMsg('info', 'CSV export will be added in a future update.');
+    const handleDelete = async (userId: string) => {
+        if (window.confirm("Are you sure you want to delete this user? This cannot be undone.")) {
+            try {
+                await deleteUser(userId);
+                setUsers(prev => prev.filter(u => u.id !== userId));
+                showMsg('info', 'User deleted.');
+            } catch (error) {
+                showMsg('error', 'Failed to delete user');
+            }
+        }
     };
 
     const handlePermissionChange = (module: string, level: PermissionLevel) => {
         setPermissionsData(prev => ({
             ...prev,
-            [module]: level
+            [module.toUpperCase()]: level
         }));
     };
 
-    // --- Filtering ---
+    // --- Filtering Logic ---
     const filteredUsers = users.filter(u => {
         const matchesRole = filterRole === 'ALL' || u.role === filterRole;
         const matchesStatus = filterStatus === 'ALL' || u.status === filterStatus;
-        const matchesSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.email.toLowerCase().includes(searchTerm.toLowerCase());
+        const searchLower = searchTerm.toLowerCase();
+        const matchesSearch =
+            (u.name?.toLowerCase() || '').includes(searchLower) ||
+            (u.email?.toLowerCase() || '').includes(searchLower);
+
         return matchesRole && matchesStatus && matchesSearch;
     });
 
     if (loading) {
         return (
-            <div className="p-8 text-slate-400">
-                Loading users...
+            <div className="flex items-center justify-center h-64">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-3 text-slate-500">Loading users...</span>
             </div>
         );
     }
-
 
     return (
         <div className="space-y-6">
@@ -128,23 +150,28 @@ const UserManagementPage: React.FC<Props> = ({ user }) => {
                     <h1 className="text-2xl font-bold text-slate-800 dark:text-white">User Management</h1>
                     <p className="text-slate-500 dark:text-slate-400">Manage accounts, roles, and access permissions.</p>
                 </div>
+                {/* Export/Import Buttons (Visual Only) */}
                 <div className="flex gap-2">
-                    <button onClick={handleImport} className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-2">
+                    <button onClick={() => showMsg('info', 'Coming soon')} className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-2">
                         <i className="fa-solid fa-file-import"></i> Import CSV
                     </button>
-                    <button onClick={handleExport} className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-2">
+                    <button onClick={() => showMsg('info', 'Coming soon')} className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-2">
                         <i className="fa-solid fa-file-export"></i> Export
                     </button>
                 </div>
             </div>
 
+            {/* Notification Toast */}
             {msg && (
-                <div className={`px-4 py-3 rounded-lg flex items-center gap-2 ${msg.type === 'success' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}>
-                    <i className="fa-solid fa-info-circle"></i> {msg.text}
+                <div className={`px-4 py-3 rounded-lg flex items-center gap-2 ${msg.type === 'success' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                    msg.type === 'error' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                        'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                    }`}>
+                    <i className={`fa-solid ${msg.type === 'success' ? 'fa-check' : 'fa-info-circle'}`}></i> {msg.text}
                 </div>
             )}
 
-            {/* Filters & Search */}
+            {/* Filters */}
             <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col md:flex-row gap-4">
                 <div className="flex-1 relative">
                     <i className="fa-solid fa-search absolute left-3 top-3 text-slate-400"></i>
@@ -198,7 +225,12 @@ const UserManagementPage: React.FC<Props> = ({ user }) => {
                                 <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                                     <td className="px-6 py-4">
                                         <div className="flex items-center gap-3">
-                                            <img src={u.avatarUrl || `https://ui-avatars.com/api/?name=${u.name}`} className="w-9 h-9 rounded-full" alt="" />
+                                            <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center overflow-hidden text-slate-500">
+                                                {u.avatarUrl ?
+                                                    <img src={u.avatarUrl} alt="" className="w-full h-full object-cover" /> :
+                                                    <span className="font-bold">{u.name?.charAt(0)}</span>
+                                                }
+                                            </div>
                                             <div>
                                                 <p className="font-semibold text-slate-800 dark:text-slate-200 text-sm">{u.name}</p>
                                                 <p className="text-xs text-slate-500 dark:text-slate-400">{u.email}</p>
@@ -264,7 +296,9 @@ const UserManagementPage: React.FC<Props> = ({ user }) => {
                             ))}
                             {filteredUsers.length === 0 && (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400 dark:text-slate-500 italic">No users found.</td>
+                                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400 dark:text-slate-500 italic">
+                                        {users.length === 0 ? "No users found in database." : "No users match your filters."}
+                                    </td>
                                 </tr>
                             )}
                         </tbody>
@@ -308,7 +342,6 @@ const UserManagementPage: React.FC<Props> = ({ user }) => {
                             <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
                                 <div className="flex justify-between items-center mb-2">
                                     <h3 className="font-bold text-slate-800 dark:text-white">Permissions</h3>
-                                    <button onClick={handleResetPassword} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">Reset Password</button>
                                 </div>
                                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Granular access control for system modules.</p>
 
@@ -324,18 +357,18 @@ const UserManagementPage: React.FC<Props> = ({ user }) => {
                                         </thead>
                                         <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                                             {MODULES.map(mod => {
-                                                const current = permissionsData[mod.toUpperCase()] || 'READ'; // Default to READ
+                                                const current = permissionsData[mod.toUpperCase()] || 'READ';
                                                 return (
                                                     <tr key={mod}>
                                                         <td className="px-4 py-2 font-medium text-slate-700 dark:text-slate-300">{mod}</td>
                                                         <td className="px-4 py-2 text-center">
-                                                            <input type="radio" name={`perm-${mod}`} checked={current === 'READ'} onChange={() => handlePermissionChange(mod.toUpperCase(), 'READ')} className="dark:bg-slate-700" />
+                                                            <input type="radio" name={`perm-${mod}`} checked={current === 'READ'} onChange={() => handlePermissionChange(mod, 'READ')} className="dark:bg-slate-700" />
                                                         </td>
                                                         <td className="px-4 py-2 text-center">
-                                                            <input type="radio" name={`perm-${mod}`} checked={current === 'WRITE'} onChange={() => handlePermissionChange(mod.toUpperCase(), 'WRITE')} className="dark:bg-slate-700" />
+                                                            <input type="radio" name={`perm-${mod}`} checked={current === 'WRITE'} onChange={() => handlePermissionChange(mod, 'WRITE')} className="dark:bg-slate-700" />
                                                         </td>
                                                         <td className="px-4 py-2 text-center">
-                                                            <input type="radio" name={`perm-${mod}`} checked={current === 'NONE'} onChange={() => handlePermissionChange(mod.toUpperCase(), 'NONE')} className="dark:bg-slate-700" />
+                                                            <input type="radio" name={`perm-${mod}`} checked={current === 'NONE'} onChange={() => handlePermissionChange(mod, 'NONE')} className="dark:bg-slate-700" />
                                                         </td>
                                                     </tr>
                                                 )

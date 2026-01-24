@@ -234,3 +234,22 @@ export interface MaintenanceRequest {
   adminReply?: string;
   isArchived?: boolean;
 }
+
+export interface BookingRequest {
+  subject: string;
+  labId: string;
+  date: string;
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  systemCount: number;
+  reminder: boolean;
+  userId: string;
+  userName: string;
+  userRole?: UserRole;
+}
+
+export interface ConflictResult {
+  hasConflict: boolean;
+  message?: string;
+  conflictingBooking?: Booking;
+}

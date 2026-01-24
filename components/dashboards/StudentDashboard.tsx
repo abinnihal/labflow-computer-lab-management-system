@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, Booking, Task } from '../../types';
 import { getStudentStatus, checkInStudent, checkOutStudent, AttendanceRecord, getLogsByStudent, submitActivity } from '../../services/attendanceService';
@@ -16,10 +15,10 @@ const MiniCalendar: React.FC = () => {
   const today = new Date();
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
-  
+
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const firstDay = new Date(currentYear, currentMonth, 1).getDay();
-  
+
   const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
   const calendarDays = [];
 
@@ -32,13 +31,12 @@ const MiniCalendar: React.FC = () => {
   for (let i = 1; i <= daysInMonth; i++) {
     const isToday = i === today.getDate();
     calendarDays.push(
-      <div 
-        key={i} 
-        className={`h-8 w-8 flex items-center justify-center text-xs rounded-full ${
-          isToday 
-            ? 'bg-blue-600 text-white font-bold shadow-md' 
+      <div
+        key={i}
+        className={`h-8 w-8 flex items-center justify-center text-xs rounded-full ${isToday
+            ? 'bg-blue-600 text-white font-bold shadow-md'
             : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-        }`}
+          }`}
       >
         {i}
       </div>
@@ -75,36 +73,51 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
   const [pendingTasks, setPendingTasks] = useState<Task[]>([]);
 
   useEffect(() => {
-    const status = getStudentStatus(user.id);
-    setIsCheckedIn(status.isCheckedIn);
-    setCurrentRecord(status.currentRecord);
+    // WRAPPER FUNCTION FOR ASYNC CALLS
+    const fetchDashboardData = async () => {
+      // 1. Status Check (Attendance service is currently local/sync)
+      const status = getStudentStatus(user.id);
+      setIsCheckedIn(status.isCheckedIn);
+      setCurrentRecord(status.currentRecord);
 
-    // Calculate Attendance Average Dynamically
-    const logs = getLogsByStudent(user.id);
-    const completed = logs.filter(l => l.status === 'COMPLETED').length;
-    
-    // Get all past bookings for this user (simulating expected sessions)
-    const allBookings = getAllBookings();
-    const now = new Date();
-    const pastBookings = allBookings.filter(b => {
-        // In a real app, match booking to student's course/batch
-        // For demo, we check generic or user specific bookings
-        return new Date(b.endTime) < now && (b.userId === user.id || b.userId === 'f-demo'); 
-    });
+      // 2. Attendance Avg Calculation (Now Async - needs await)
+      try {
+        const allBookings = await getAllBookings();
 
-    const totalSessions = Math.max(pastBookings.length, 1); // Avoid division by zero
-    // If logs > expected (e.g. extra lab practice), cap at 100%
-    setAttendanceAvg(Math.min(100, Math.round((completed / totalSessions) * 100)));
+        const now = new Date();
+        const pastBookings = allBookings.filter(b => {
+          // In a real app, match booking to student's course/batch
+          // For demo, we check generic or user specific bookings
+          return new Date(b.endTime) < now && (b.userId === user.id || b.userId === 'f-demo');
+        });
 
-    // Get Next Lab
-    setNextBooking(getNextLabSession(user.id));
+        const logs = getLogsByStudent(user.id);
+        const completed = logs.filter(l => l.status === 'COMPLETED').length;
+        const totalSessions = Math.max(pastBookings.length, 1); // Avoid division by zero
 
-    // Get Pending Tasks
-    const allTasks = getTasksForStudent(user.id);
-    const pending = allTasks
+        // If logs > expected (e.g. extra lab practice), cap at 100%
+        setAttendanceAvg(Math.min(100, Math.round((completed / totalSessions) * 100)));
+      } catch (error) {
+        console.error("Error fetching bookings for stats:", error);
+      }
+
+      // 3. Get Next Lab (Now Async - needs await)
+      try {
+        const next = await getNextLabSession(user.id);
+        setNextBooking(next);
+      } catch (error) {
+        console.error("Error fetching next session:", error);
+      }
+
+      // 4. Get Pending Tasks (Task service is currently sync)
+      const allTasks = getTasksForStudent(user.id);
+      const pending = allTasks
         .filter(t => !t.submission || t.submission.status === 'REJECTED')
         .map(t => t.task);
-    setPendingTasks(pending);
+      setPendingTasks(pending);
+    };
+
+    fetchDashboardData();
 
   }, [user.id, refreshTrigger]);
 
@@ -114,11 +127,11 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
       setTimeout(() => {
         checkOutStudent(user.id);
         // Background Activity Routing
-        submitActivity(user, 'checkout', { 
-            recordId: currentRecord?.id, 
-            duration: '2h' // Mock duration calculation 
+        submitActivity(user, 'checkout', {
+          recordId: currentRecord?.id,
+          duration: '2h' // Mock duration calculation 
         });
-        
+
         setIsCheckedIn(false);
         setCurrentRecord(null);
         setProcessing(false);
@@ -134,12 +147,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
     setShowCheckInModal(false);
     setTimeout(() => {
       const record = checkInStudent(user, labId, systemNumber);
-      
+
       // Background Activity Routing
-      submitActivity(user, 'checkin', { 
-          labId, 
-          systemNumber,
-          recordId: record.id 
+      submitActivity(user, 'checkin', {
+        labId,
+        systemNumber,
+        recordId: record.id
       });
 
       setIsCheckedIn(true);
@@ -184,23 +197,22 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
                 {isCheckedIn ? 'Current Session Active' : 'Ready for Lab?'}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {isCheckedIn 
-                  ? `Checked in at ${new Date(currentRecord!.checkInTime).toLocaleTimeString()}` 
-                  : nextBooking 
-                    ? `Next: ${nextBooking.subject} at ${new Date(nextBooking.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`
+                {isCheckedIn
+                  ? `Checked in at ${new Date(currentRecord!.checkInTime).toLocaleTimeString()}`
+                  : nextBooking
+                    ? `Next: ${nextBooking.subject} at ${new Date(nextBooking.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                     : 'No upcoming lab sessions scheduled.'
                 }
               </p>
             </div>
           </div>
 
-          <button 
+          <button
             onClick={handleToggleAttendance}
             disabled={processing}
-            className={`w-full md:w-64 py-3.5 rounded-xl font-bold text-white shadow-md transition-all flex items-center justify-center gap-2 text-lg transform hover:scale-[1.02] ${
-              processing ? 'bg-slate-400 dark:bg-slate-600 cursor-wait' : 
-              isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : 'bg-green-600 hover:bg-green-700 shadow-green-500/20'
-            }`}
+            className={`w-full md:w-64 py-3.5 rounded-xl font-bold text-white shadow-md transition-all flex items-center justify-center gap-2 text-lg transform hover:scale-[1.02] ${processing ? 'bg-slate-400 dark:bg-slate-600 cursor-wait' :
+                isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : 'bg-green-600 hover:bg-green-700 shadow-green-500/20'
+              }`}
           >
             {processing ? (
               <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Processing...</>
@@ -211,94 +223,94 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
             )}
           </button>
         </div>
-        
+
         {isCheckedIn && currentRecord && (
           <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 flex gap-6 text-sm">
-             <div>
-                <span className="text-slate-400 text-xs uppercase font-bold">Lab</span>
-                <p className="font-semibold text-slate-700 dark:text-slate-300">{currentRecord.labName}</p>
-             </div>
-             <div>
-                <span className="text-slate-400 text-xs uppercase font-bold">System</span>
-                <p className="font-semibold text-slate-700 dark:text-slate-300">#{currentRecord.systemNumber}</p>
-             </div>
+            <div>
+              <span className="text-slate-400 text-xs uppercase font-bold">Lab</span>
+              <p className="font-semibold text-slate-700 dark:text-slate-300">{currentRecord.labName}</p>
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs uppercase font-bold">System</span>
+              <p className="font-semibold text-slate-700 dark:text-slate-300">#{currentRecord.systemNumber}</p>
+            </div>
           </div>
         )}
       </div>
 
       {/* Main Grid: Attendance, Calendar, Tasks */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto">
-        
+
         {/* 1. Attendance Average */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 flex flex-col items-center justify-center relative transition-colors">
-           <h3 className="w-full text-left font-bold text-slate-800 dark:text-white mb-2">Attendance Avg</h3>
-           <div className="h-40 w-40 relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={attendanceData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={70}
-                    startAngle={90}
-                    endAngle={-270}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {attendanceData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                 <span className="text-3xl font-bold text-slate-800 dark:text-white">{attendanceAvg}%</span>
-                 <span className="text-[10px] text-slate-400 uppercase font-bold">Present</span>
-              </div>
-           </div>
-           <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-2">{getMotivationalText(attendanceAvg)}</p>
+          <h3 className="w-full text-left font-bold text-slate-800 dark:text-white mb-2">Attendance Avg</h3>
+          <div className="h-40 w-40 relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={attendanceData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={70}
+                  startAngle={90}
+                  endAngle={-270}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {attendanceData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-3xl font-bold text-slate-800 dark:text-white">{attendanceAvg}%</span>
+              <span className="text-[10px] text-slate-400 uppercase font-bold">Present</span>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-2">{getMotivationalText(attendanceAvg)}</p>
         </div>
 
         {/* 2. Small Calendar */}
         <div className="lg:h-full">
-           <MiniCalendar />
+          <MiniCalendar />
         </div>
 
         {/* 3. Pending Tasks */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col transition-colors">
-           <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-              <h3 className="font-bold text-slate-800 dark:text-white">Pending Tasks</h3>
-              <Link to="/dashboard/tasks" className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline">View All</Link>
-           </div>
-           <div className="flex-1 overflow-y-auto p-2 max-h-[300px] lg:max-h-none">
-              {pendingTasks.length > 0 ? (
-                <div className="space-y-2">
-                  {pendingTasks.slice(0, 4).map(task => (
-                    <div key={task.id} className="p-3 rounded-lg border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group">
-                       <div className="flex justify-between items-start mb-1">
-                          <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 line-clamp-1">{task.title}</h4>
-                          <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 rounded font-bold">Due {task.dueDate}</span>
-                       </div>
-                       <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">{task.description}</p>
-                       <div className="mt-2 flex justify-end">
-                          <Link to="/dashboard/tasks" className="text-[10px] text-blue-600 dark:text-blue-400 font-bold group-hover:underline">Submit Now <i className="fa-solid fa-arrow-right ml-1"></i></Link>
-                       </div>
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+            <h3 className="font-bold text-slate-800 dark:text-white">Pending Tasks</h3>
+            <Link to="/dashboard/tasks" className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline">View All</Link>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 max-h-[300px] lg:max-h-none">
+            {pendingTasks.length > 0 ? (
+              <div className="space-y-2">
+                {pendingTasks.slice(0, 4).map(task => (
+                  <div key={task.id} className="p-3 rounded-lg border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group">
+                    <div className="flex justify-between items-start mb-1">
+                      <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 line-clamp-1">{task.title}</h4>
+                      <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 rounded font-bold">Due {task.dueDate}</span>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 py-8">
-                   <i className="fa-solid fa-clipboard-check text-3xl mb-2 opacity-50"></i>
-                   <p className="text-sm">All caught up!</p>
-                </div>
-              )}
-           </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">{task.description}</p>
+                    <div className="mt-2 flex justify-end">
+                      <Link to="/dashboard/tasks" className="text-[10px] text-blue-600 dark:text-blue-400 font-bold group-hover:underline">Submit Now <i className="fa-solid fa-arrow-right ml-1"></i></Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 py-8">
+                <i className="fa-solid fa-clipboard-check text-3xl mb-2 opacity-50"></i>
+                <p className="text-sm">All caught up!</p>
+              </div>
+            )}
+          </div>
         </div>
 
       </div>
 
-      <CheckInModal 
+      <CheckInModal
         isOpen={showCheckInModal}
         onClose={() => setShowCheckInModal(false)}
         onCheckIn={processCheckIn}
@@ -309,4 +321,3 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 };
 
 export default StudentDashboard;
-    

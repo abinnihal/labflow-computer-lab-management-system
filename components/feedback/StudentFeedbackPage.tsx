@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Feedback, Lab } from '../../types'; // Added Lab type
-// FIX: Import from labService instead of bookingService
+import { User, Feedback, Lab } from '../../types';
 import { getAllLabs } from '../../services/labService';
 import { createFeedback, getFeedbackByStudent } from '../../services/maintenanceService';
 import { submitActivity } from '../../services/attendanceService';
@@ -19,18 +18,15 @@ const StudentFeedbackPage: React.FC<Props> = ({ user }) => {
     const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
     const [history, setHistory] = useState<Feedback[]>([]);
-
-    // FIX: State for Labs (Async Data)
     const [labs, setLabs] = useState<Lab[]>([]);
 
-    // 1. Fetch Labs on Mount
     useEffect(() => {
         const fetchLabs = async () => {
             try {
                 const data = await getAllLabs();
                 setLabs(data);
             } catch (error) {
-                console.error("Failed to load labs for feedback form", error);
+                console.error("Failed to load labs", error);
             }
         };
         fetchLabs();
@@ -40,11 +36,12 @@ const StudentFeedbackPage: React.FC<Props> = ({ user }) => {
         refreshHistory();
     }, [user.id]);
 
-    const refreshHistory = () => {
-        setHistory(getFeedbackByStudent(user.id));
+    const refreshHistory = async () => {
+        const data = await getFeedbackByStudent(user.id);
+        setHistory(data);
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!content.trim()) {
             setMsg({ type: 'error', text: 'Please enter feedback content.' });
@@ -52,37 +49,70 @@ const StudentFeedbackPage: React.FC<Props> = ({ user }) => {
         }
 
         setIsSubmitting(true);
-        setTimeout(() => {
-            createFeedback({
+
+        try {
+            // Construct payload safely
+            const payload: any = {
                 studentId: user.id,
                 studentName: user.name,
                 target,
                 category,
-                labId: category === 'LAB_ISSUE' ? labId : undefined,
-                content,
-                rating: rating > 0 ? rating : undefined
-            });
+                content
+            };
 
-            // Background Activity Routing
-            submitActivity(user, 'feedback', {
-                target,
-                category,
-                rating,
-                isAnonymous: false
-            });
+            if (category === 'LAB_ISSUE' && labId) {
+                payload.labId = labId;
+            }
 
-            setIsSubmitting(false);
+            if (rating > 0) {
+                payload.rating = rating;
+            }
+
+            await createFeedback(payload);
+
+            try {
+                submitActivity(user, 'feedback', {
+                    target,
+                    category,
+                    rating,
+                    isAnonymous: false
+                });
+            } catch (err) {
+                console.warn("Activity log failed (non-fatal):", err);
+            }
+
             setMsg({ type: 'success', text: 'Feedback submitted successfully!' });
             setContent('');
             setRating(0);
             refreshHistory();
+        } catch (error: any) {
+            console.error("Submission error:", error);
+            setMsg({ type: 'error', text: 'Failed to submit: ' + error.message });
+        } finally {
+            setIsSubmitting(false);
             setTimeout(() => setMsg(null), 3000);
-        }, 1000);
+        }
     };
 
-    const getStatusColor = (status?: string) => {
-        if (status === 'RESOLVED') return 'bg-green-100 text-green-700';
-        return 'bg-yellow-100 text-yellow-700';
+    // --- NEW: Smart Status Logic (Same as Faculty Page) ---
+    const getDisplayStatus = (status: string, category: string) => {
+        if (status === 'PENDING') {
+            if (category === 'LAB_ISSUE') return 'Open Ticket';
+            return 'Received';
+        }
+        if (status === 'RESOLVED') {
+            if (category === 'LAB_ISSUE') return 'Fixed';
+            if (category === 'TEACHING') return 'Acknowledged';
+            return 'Noted';
+        }
+        return status;
+    };
+
+    const getStatusColor = (status: string, category: string) => {
+        if (status === 'RESOLVED') return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
+
+        if (category === 'LAB_ISSUE') return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
+        return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400';
     };
 
     return (
@@ -218,8 +248,10 @@ const StudentFeedbackPage: React.FC<Props> = ({ user }) => {
                                                 </span>
                                                 <span className="text-xs text-slate-400 dark:text-slate-500">• {new Date(fb.date).toLocaleDateString()}</span>
                                             </div>
-                                            <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${getStatusColor(fb.status)}`}>
-                                                {fb.status}
+
+                                            {/* NEW: Smart Status Display */}
+                                            <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${getStatusColor(fb.status || 'PENDING', fb.category)}`}>
+                                                {getDisplayStatus(fb.status || 'PENDING', fb.category)}
                                             </span>
                                         </div>
 
@@ -238,7 +270,7 @@ const StudentFeedbackPage: React.FC<Props> = ({ user }) => {
 
                                         {fb.adminReply && (
                                             <div className="mt-3 ml-4 pl-4 border-l-2 border-green-500">
-                                                <p className="text-xs font-bold text-green-600 dark:text-green-400 uppercase mb-1">Reply from Admin/Faculty</p>
+                                                <p className="text-xs font-bold text-green-600 dark:text-green-400 uppercase mb-1">Reply from {fb.target}</p>
                                                 <p className="text-sm text-slate-700 dark:text-slate-300">{fb.adminReply}</p>
                                             </div>
                                         )}

@@ -4,20 +4,17 @@ import {
   addDoc,
   updateDoc,
   doc,
-  query,
-  where,
-  Timestamp,
   getDoc
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { Booking, Lab, BookingLog, UserRole, BookingRequest, ConflictResult } from '../types';
+import { Booking, BookingLog, UserRole, BookingRequest, ConflictResult } from '../types';
 import { sendNotification } from './notificationService';
-import { getAllLabs } from './labService';
+import { getAllLabs } from './labService'; // Import from labService directly
 
 // Collection Reference
 const BOOKINGS_COLLECTION = 'bookings';
 
-// Helper: Add log to local object (Persistence handled in update/create)
+// Helper: Add log to local object
 const createLogEntry = (action: BookingLog['action'], userId: string, userName: string, details?: string): BookingLog => ({
   action,
   byUserId: userId,
@@ -32,7 +29,6 @@ const mapDocToBooking = (doc: any): Booking => {
   return {
     id: doc.id,
     ...data,
-    // Ensure dates are converted back to ISO strings if they are Timestamps
     startTime: data.startTime?.toDate ? data.startTime.toDate().toISOString() : data.startTime,
     endTime: data.endTime?.toDate ? data.endTime.toDate().toISOString() : data.endTime,
   } as Booking;
@@ -49,12 +45,6 @@ export const getAllBookings = async (): Promise<Booking[]> => {
   }
 };
 
-export const getLabs = (): Lab[] => {
-  // Note: This still calls the synchronous labService. 
-  // We will fix labService in the next step.
-  return getAllLabs();
-};
-
 export const getNextLabSession = async (studentId: string): Promise<Booking | null> => {
   const now = new Date();
   const bookings = await getAllBookings();
@@ -67,8 +57,11 @@ export const getNextLabSession = async (studentId: string): Promise<Booking | nu
 };
 
 export const checkConflict = async (req: BookingRequest, excludeBookingId?: string): Promise<ConflictResult> => {
-  const labs = getAllLabs();
-  const lab = labs.find(l => l.id === req.labId);
+  // FIX: Must await this now
+  const labs = await getAllLabs();
+
+  // Handle both ID formats (string 'l1' or Firestore ID)
+  const lab = labs.find(l => l.id === req.labId || (l as any).originalId === req.labId);
 
   if (!lab) return { hasConflict: true, message: "Invalid Lab ID" };
 
@@ -87,8 +80,6 @@ export const checkConflict = async (req: BookingRequest, excludeBookingId?: stri
     return { hasConflict: true, message: `Requested systems (${req.systemCount}) exceed lab capacity (${lab.capacity}).` };
   }
 
-  // Fetch all bookings for this lab to check overlap
-  // Optimization: In a real app, use a Firestore query for the specific date range.
   const allBookings = await getAllBookings();
 
   const conflict = allBookings.find(b => {
@@ -99,7 +90,6 @@ export const checkConflict = async (req: BookingRequest, excludeBookingId?: stri
     const existingStart = new Date(b.startTime);
     const existingEnd = new Date(b.endTime);
 
-    // Check overlap
     return startDateTime < existingEnd && endDateTime > existingStart;
   });
 
@@ -117,7 +107,6 @@ export const checkConflict = async (req: BookingRequest, excludeBookingId?: stri
 };
 
 export const createBooking = async (req: BookingRequest, isOverride: boolean = false): Promise<Booking> => {
-  // Verify conflict again server-side (optional but recommended)
   if (!isOverride) {
     const conflict = await checkConflict(req);
     if (conflict.hasConflict) throw new Error(conflict.message);
@@ -130,7 +119,6 @@ export const createBooking = async (req: BookingRequest, isOverride: boolean = f
     userId: req.userId,
     userName: req.userName,
     subject: req.subject,
-    // Store as Firestore Timestamp or ISO string. Using Date object lets Firestore convert to Timestamp automatically.
     startTime: new Date(`${req.date}T${req.startTime}:00`),
     endTime: new Date(`${req.date}T${req.endTime}:00`),
     status: initialStatus,
@@ -142,14 +130,12 @@ export const createBooking = async (req: BookingRequest, isOverride: boolean = f
 
   const docRef = await addDoc(collection(db, BOOKINGS_COLLECTION), bookingData);
 
-  // Notification Logic
   if (initialStatus === 'PENDING') {
     await sendNotification('SYSTEM', 'ADMIN_GROUP', `New booking request from ${req.userName} for ${req.subject}.`, 'INFO');
   } else if (req.userRole === UserRole.ADMIN && req.userId !== 'a-demo') {
     await sendNotification('ADMIN', req.userId, `Admin booked "${req.subject}" for you.`, 'INFO');
   }
 
-  // Return the new booking object
   return { id: docRef.id, ...bookingData, startTime: bookingData.startTime.toISOString(), endTime: bookingData.endTime.toISOString() } as unknown as Booking;
 };
 
@@ -168,7 +154,6 @@ export const updateBooking = async (bookingId: string, req: BookingRequest, edit
     endTime: new Date(`${req.date}T${req.endTime}:00`),
     systemCount: req.systemCount,
     reminder: req.reminder,
-    // Append log
     logs: [...(oldBooking.logs || []), createLogEntry('UPDATED', editorId, editorName, `Changed details.`)]
   };
 

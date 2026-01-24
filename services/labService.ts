@@ -1,87 +1,123 @@
-
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  getDoc,
+  setDoc
+} from 'firebase/firestore';
+import { db } from './firebase';
 import { Lab, LabInventoryItem, RecurringSlot, TimeSlotRule } from '../types';
-import { LABS as INITIAL_LABS } from '../constants';
+import { LABS as DEFAULT_LABS } from '../constants';
 
-// Initialize with constant infrastructure
-let LABS_DATA: Lab[] = [...INITIAL_LABS.map(l => ({ ...l, inventory: [] }))];
+const LABS_COLLECTION = 'labs';
+const SETTINGS_COLLECTION = 'settings';
+const RULES_DOC_ID = 'slot_rules';
 
-// Mock Inventory - Empty for final output
-if (LABS_DATA[0]) {
-  LABS_DATA[0].inventory = [];
-}
+// --- LABS CRUD ---
 
-let RECURRING_SLOTS: RecurringSlot[] = [];
+export const getAllLabs = async (): Promise<Lab[]> => {
+  try {
+    const snapshot = await getDocs(collection(db, LABS_COLLECTION));
+    if (snapshot.empty) {
+      // Optional: Seed if empty
+      return [];
+    }
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lab));
+  } catch (error) {
+    console.error("Error getting labs:", error);
+    return [];
+  }
+};
 
-let SLOT_RULES: TimeSlotRule = {
-  id: 'rules-1',
-  startTime: '08:00',
-  endTime: '18:00',
+export const createLab = async (lab: Omit<Lab, 'id'>): Promise<Lab> => {
+  const docRef = await addDoc(collection(db, LABS_COLLECTION), {
+    ...lab,
+    inventory: [] // Initialize empty inventory
+  });
+  return { id: docRef.id, ...lab, inventory: [] };
+};
+
+export const updateLab = async (id: string, updates: Partial<Lab>): Promise<void> => {
+  const labRef = doc(db, LABS_COLLECTION, id);
+  await updateDoc(labRef, updates);
+};
+
+export const deleteLab = async (id: string): Promise<void> => {
+  await deleteDoc(doc(db, LABS_COLLECTION, id));
+};
+
+// --- INVENTORY MANAGEMENT (Stored as array in Lab Document) ---
+
+export const getLabInventory = async (labId: string): Promise<LabInventoryItem[]> => {
+  const labRef = doc(db, LABS_COLLECTION, labId);
+  const snap = await getDoc(labRef);
+  if (snap.exists()) {
+    const data = snap.data() as Lab;
+    return data.inventory || [];
+  }
+  return [];
+};
+
+export const addInventoryItem = async (labId: string, item: Omit<LabInventoryItem, 'id'>): Promise<void> => {
+  const labRef = doc(db, LABS_COLLECTION, labId);
+  const snap = await getDoc(labRef);
+
+  if (snap.exists()) {
+    const lab = snap.data() as Lab;
+    const currentInv = lab.inventory || [];
+    const newItem = { ...item, id: `inv-${Date.now()}` };
+
+    await updateDoc(labRef, {
+      inventory: [...currentInv, newItem]
+    });
+  }
+};
+
+export const removeInventoryItem = async (labId: string, itemId: string): Promise<void> => {
+  const labRef = doc(db, LABS_COLLECTION, labId);
+  const snap = await getDoc(labRef);
+
+  if (snap.exists()) {
+    const lab = snap.data() as Lab;
+    const currentInv = lab.inventory || [];
+    const updatedInv = currentInv.filter(i => i.id !== itemId);
+
+    await updateDoc(labRef, { inventory: updatedInv });
+  }
+};
+
+// --- RULES & SLOTS (Mock/Local Storage for now to save complexity) ---
+// Note: In a full production app, these should also be in Firestore.
+// We will use a simple local variable for the demo session or fetch from a 'settings' collection.
+
+let LOCAL_SLOTS: RecurringSlot[] = [];
+let LOCAL_RULES: TimeSlotRule = {
+  id: 'default',
+  startTime: '09:00',
+  endTime: '17:00',
   slotDuration: 60,
   blackoutDates: []
 };
 
-// --- Lab CRUD ---
-export const getAllLabs = (): Lab[] => {
-  return LABS_DATA;
-};
-
-export const createLab = (lab: Omit<Lab, 'id'>): Lab => {
-  const newLab = { ...lab, id: `l-${Date.now()}`, inventory: [] };
-  LABS_DATA.push(newLab);
-  return newLab;
-};
-
-export const updateLab = (id: string, updates: Partial<Lab>): Lab | null => {
-  const idx = LABS_DATA.findIndex(l => l.id === id);
-  if (idx !== -1) {
-    LABS_DATA[idx] = { ...LABS_DATA[idx], ...updates };
-    return LABS_DATA[idx];
-  }
-  return null;
-};
-
-export const deleteLab = (id: string): void => {
-  LABS_DATA = LABS_DATA.filter(l => l.id !== id);
-};
-
-// --- Inventory ---
-export const getLabInventory = (labId: string): LabInventoryItem[] => {
-  const lab = LABS_DATA.find(l => l.id === labId);
-  return lab?.inventory || [];
-};
-
-export const addInventoryItem = (labId: string, item: Omit<LabInventoryItem, 'id'>): void => {
-  const lab = LABS_DATA.find(l => l.id === labId);
-  if (lab) {
-    if (!lab.inventory) lab.inventory = [];
-    lab.inventory.push({ ...item, id: `inv-${Date.now()}` });
-  }
-};
-
-export const removeInventoryItem = (labId: string, itemId: string): void => {
-  const lab = LABS_DATA.find(l => l.id === labId);
-  if (lab && lab.inventory) {
-    lab.inventory = lab.inventory.filter(i => i.id !== itemId);
-  }
-};
-
-// --- Rules & Slots ---
 export const getRecurringSlots = (): RecurringSlot[] => {
-  return RECURRING_SLOTS;
+  return LOCAL_SLOTS;
 };
 
 export const addRecurringSlot = (slot: Omit<RecurringSlot, 'id'>): void => {
-  RECURRING_SLOTS.push({ ...slot, id: `rs-${Date.now()}` });
+  LOCAL_SLOTS.push({ ...slot, id: `slot-${Date.now()}` });
 };
 
 export const removeRecurringSlot = (id: string): void => {
-  RECURRING_SLOTS = RECURRING_SLOTS.filter(s => s.id !== id);
+  LOCAL_SLOTS = LOCAL_SLOTS.filter(s => s.id !== id);
 };
 
 export const getSlotRules = (): TimeSlotRule => {
-  return SLOT_RULES;
+  return LOCAL_RULES;
 };
 
 export const updateSlotRules = (rules: Partial<TimeSlotRule>): void => {
-  SLOT_RULES = { ...SLOT_RULES, ...rules };
+  LOCAL_RULES = { ...LOCAL_RULES, ...rules };
 };

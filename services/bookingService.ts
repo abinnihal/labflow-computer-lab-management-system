@@ -57,17 +57,32 @@ export const getNextLabSession = async (studentId: string): Promise<Booking | nu
 };
 
 export const checkConflict = async (req: BookingRequest, excludeBookingId?: string): Promise<ConflictResult> => {
-  // FIX: Must await this now
   const labs = await getAllLabs();
-
-  // Handle both ID formats (string 'l1' or Firestore ID)
-  const lab = labs.find(l => l.id === req.labId || (l as any).originalId === req.labId);
+  const lab = labs.find(l => l.id === req.labId);
 
   if (!lab) return { hasConflict: true, message: "Invalid Lab ID" };
 
-  if (lab.status === 'MAINTENANCE' || lab.status === 'OFFLINE') {
-    return { hasConflict: true, message: `Maintenance Undergoing: ${lab.name} is currently unavailable for bookings.` };
+  // --- NEW MAINTENANCE LOGIC ---
+  if (lab.status === 'OFFLINE') {
+    return { hasConflict: true, message: `Lab is permanently offline.` };
   }
+
+  if (lab.status === 'MAINTENANCE') {
+    // If there is a timer, check if the booking is during maintenance
+    if (lab.maintenanceUntil) {
+      const maintenanceEnd = new Date(lab.maintenanceUntil);
+      const bookingStart = new Date(`${req.date}T${req.startTime}:00`);
+
+      if (bookingStart < maintenanceEnd) {
+        const untilStr = maintenanceEnd.toLocaleString();
+        return { hasConflict: true, message: `Lab is under maintenance until ${untilStr}.` };
+      }
+    } else {
+      // No timer set, assume indefinite maintenance
+      return { hasConflict: true, message: `Lab is currently under maintenance.` };
+    }
+  }
+  // -----------------------------
 
   const startDateTime = new Date(`${req.date}T${req.startTime}:00`);
   const endDateTime = new Date(`${req.date}T${req.endTime}:00`);
@@ -76,12 +91,12 @@ export const checkConflict = async (req: BookingRequest, excludeBookingId?: stri
     return { hasConflict: true, message: "End time must be after start time." };
   }
 
+  // ... keep the rest of the existing conflict logic (capacity, overlap) ...
   if (req.systemCount > lab.capacity) {
     return { hasConflict: true, message: `Requested systems (${req.systemCount}) exceed lab capacity (${lab.capacity}).` };
   }
 
   const allBookings = await getAllBookings();
-
   const conflict = allBookings.find(b => {
     if (b.id === excludeBookingId) return false;
     if (b.labId !== req.labId) return false;
@@ -94,13 +109,7 @@ export const checkConflict = async (req: BookingRequest, excludeBookingId?: stri
   });
 
   if (conflict) {
-    const startStr = new Date(conflict.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const endStr = new Date(conflict.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return {
-      hasConflict: true,
-      message: `Conflict detected: Lab is occupied by ${conflict.userName} for "${conflict.subject}" (${startStr} - ${endStr}).`,
-      conflictingBooking: conflict
-    };
+    return { hasConflict: true, message: `Conflict: Lab occupied by ${conflict.userName}.` };
   }
 
   return { hasConflict: false };

@@ -40,8 +40,6 @@ export interface User {
   permissions?: Record<string, PermissionLevel>; // e.g., { 'CALENDAR': 'WRITE' }
 }
 
-// --- REST OF YOUR TYPES (Unchanged) ---
-
 export interface LabInventoryItem {
   id: string;
   name: string;
@@ -79,6 +77,7 @@ export interface Lab {
   assignedFacultyId?: string;
   assignedFacultyName?: string;
   inventory?: LabInventoryItem[];
+  maintenanceUntil?: string; // ISO Date String
 }
 
 export interface BookingLog {
@@ -112,6 +111,8 @@ export interface Task {
   assignedById: string;
   course: string;
   dueDate: string;
+  type: 'ASSIGNMENT' | 'LAB_EXAM' | 'PROJECT';
+  priority?: 'LOW' | 'MEDIUM' | 'HIGH';
   instructions?: string;
   hints?: string[];
   questions?: string[];
@@ -174,13 +175,16 @@ export interface Post {
 
 export interface AttendanceLog {
   id: string;
-  bookingId: string;
+  bookingId?: string;
   studentId: string;
+  studentName?: string; // Optional for easier display
   checkInTime: string;
   checkOutTime?: string;
-  status: 'PRESENT' | 'ABSENT' | 'LATE';
+  // FIX: Added 'COMPLETED' and 'PENDING' to allowed statuses
+  status: 'PRESENT' | 'ABSENT' | 'LATE' | 'COMPLETED' | 'PENDING';
   labId?: string;
   systemNumber?: number;
+  date?: string;
 }
 
 export interface Notification {
@@ -225,7 +229,7 @@ export interface MaintenanceRequest {
   facultyId: string;
   facultyName: string;
   labId: string;
-  labName: string;
+  labName?: string;
   issueTitle: string;
   description: string;
   status: 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';

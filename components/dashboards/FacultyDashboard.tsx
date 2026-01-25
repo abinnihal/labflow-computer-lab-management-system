@@ -88,38 +88,49 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
   }, [activeTab, user.department, user.managedSemesters, user.id]);
 
   const refreshData = async () => {
-    // 1. Load Calendar
-    const events = await getUpcomingEvents();
-    const today = new Date().toDateString();
-    const todaysEvents = events.filter(e => {
-      const eDate = e.start.dateTime ? new Date(e.start.dateTime) : null;
-      return eDate && eDate.toDateString() === today;
-    });
-    setSchedule(todaysEvents.length > 0 ? todaysEvents : events.slice(0, 3));
-    setLoadingSchedule(false);
+    try {
+      // 1. Load Calendar
+      const events = await getUpcomingEvents();
+      const today = new Date().toDateString();
+      const todaysEvents = events.filter(e => {
+        const eDate = e.start.dateTime ? new Date(e.start.dateTime) : null;
+        return eDate && eDate.toDateString() === today;
+      });
+      setSchedule(todaysEvents.length > 0 ? todaysEvents : events.slice(0, 3));
+      setLoadingSchedule(false);
 
-    // 2. Load Attendance & Labs (ASYNC FIX)
-    setAttendanceLogs(getAttendanceLogs());
-    const labsData = await getAllLabs();
-    setLabs(labsData);
+      // 2. Load Attendance & Labs (ASYNC FIX: Added 'await')
+      const logs = await getAttendanceLogs();
+      setAttendanceLogs(logs || []);
 
-    // 3. Load Student Activities
-    if (user.department && user.managedSemesters) {
-      setStudentActivities(getActivitiesForFaculty(user.department, user.managedSemesters));
+      const labsData = await getAllLabs();
+      setLabs(labsData || []);
+
+      // 3. Load Student Activities (ASYNC FIX: Added 'await')
+      if (user.department && user.managedSemesters) {
+        const acts = await getActivitiesForFaculty(user.department, user.managedSemesters);
+        setStudentActivities(acts || []);
+      }
+
+      // 4. Check pending students (ASYNC FIX)
+      const pendingStudents = await getPendingUsersByRole(UserRole.STUDENT, user.department, user.managedSemesters);
+      setPendingCount(pendingStudents.length);
+
+      // 5. Load Task & Issue Stats (ASYNC FIX: Added 'await')
+      const gradingCount = await getPendingSubmissionsCount(user.id);
+      setPendingGrading(gradingCount);
+
+      const issuesCount = await getPendingMaintenanceCount(user.id);
+      setLabIssues(issuesCount);
+
+    } catch (error) {
+      console.error("Dashboard Refresh Error:", error);
     }
-
-    // 4. Check pending students (ASYNC FIX)
-    const pendingStudents = await getPendingUsersByRole(UserRole.STUDENT, user.department, user.managedSemesters);
-    setPendingCount(pendingStudents.length);
-
-    // 5. Load Task & Issue Stats
-    setPendingGrading(getPendingSubmissionsCount(user.id));
-    setLabIssues(getPendingMaintenanceCount(user.id));
   };
 
-  const handleManualCheckIn = () => {
+  const handleManualCheckIn = async () => {
     if (manualEntryData.studentId && manualEntryData.labId) {
-      manualCheckIn(manualEntryData.studentId, manualEntryData.labId, manualEntryData.status);
+      await manualCheckIn(manualEntryData.studentId, manualEntryData.labId, manualEntryData.status);
       setIsManualEntryOpen(false);
       refreshData(); // Reload logs
       setManualEntryData({ studentId: '', labId: labs[0]?.id || '', status: 'PRESENT' });
@@ -131,19 +142,23 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const dataMap = days.map(day => ({ name: day, present: 0, absent: 0 }));
 
-    attendanceLogs.forEach(log => {
-      const d = new Date(log.checkInTime).getDay();
-      if (dataMap[d]) {
-        dataMap[d].present += 1;
-      }
-    });
+    if (Array.isArray(attendanceLogs)) {
+      attendanceLogs.forEach(log => {
+        const d = new Date(log.checkInTime).getDay();
+        if (dataMap[d]) {
+          dataMap[d].present += 1;
+        }
+      });
+    }
     // Filter out weekends for the view
     return dataMap.filter((_, i) => i !== 0 && i !== 6);
   }, [attendanceLogs]);
 
   // Helper to get active utilization per lab
   const getLabUtilization = (labId: string) => {
-    return attendanceLogs.filter(l => l.labId === labId && l.status === 'PRESENT').length;
+    return Array.isArray(attendanceLogs)
+      ? attendanceLogs.filter(l => l.labId === labId && l.status === 'PRESENT').length
+      : 0;
   };
 
   return (
@@ -220,14 +235,14 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                   <div className="flex justify-between items-start">
                     <div className="flex gap-4 items-center">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${act.activityType === 'checkin' ? 'bg-green-100 dark:bg-green-900/30 text-green-600' :
-                          act.activityType === 'checkout' ? 'bg-red-100 dark:bg-red-900/30 text-red-600' :
-                            act.activityType === 'task' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' :
-                              'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
+                        act.activityType === 'checkout' ? 'bg-red-100 dark:bg-red-900/30 text-red-600' :
+                          act.activityType === 'task' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' :
+                            'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
                         }`}>
                         <i className={`fa-solid ${act.activityType === 'checkin' ? 'fa-arrow-right-to-bracket' :
-                            act.activityType === 'checkout' ? 'fa-arrow-right-from-bracket' :
-                              act.activityType === 'task' ? 'fa-file-lines' :
-                                'fa-comment-dots'
+                          act.activityType === 'checkout' ? 'fa-arrow-right-from-bracket' :
+                            act.activityType === 'task' ? 'fa-file-lines' :
+                              'fa-comment-dots'
                           }`}></i>
                       </div>
                       <div>
@@ -239,8 +254,8 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                       <p className="text-xs text-slate-400 font-mono">{new Date(act.timestamp).toLocaleTimeString()}</p>
                       {act.status && (
                         <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${act.status === 'present' ? 'bg-green-100 dark:bg-green-900/30 text-green-700' :
-                            act.status === 'late' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700' :
-                              'bg-red-100 dark:bg-red-900/30 text-red-700'
+                          act.status === 'late' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700' :
+                            'bg-red-100 dark:bg-red-900/30 text-red-700'
                           }`}>
                           {act.status}
                         </span>

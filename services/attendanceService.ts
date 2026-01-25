@@ -1,21 +1,23 @@
+import {
+  collection,
+  addDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+  getDoc,
+  orderBy,
+  limit
+} from 'firebase/firestore';
+import { db } from './firebase';
+import { AttendanceLog, User } from '../types';
 
-import { User } from '../types';
-import { LABS, MOCK_ROSTER } from '../constants';
+const ATTENDANCE_COLLECTION = 'attendance_logs';
+const ACTIVITIES_COLLECTION = 'student_activities';
 
-export interface AttendanceRecord {
-  id: string;
-  studentId: string;
-  studentName: string;
-  course: string;
-  checkInTime: string; // ISO string
-  checkOutTime: string | null; // ISO string or null if currently active
-  date: string; // YYYY-MM-DD
-  status: 'PRESENT' | 'COMPLETED' | 'LATE' | 'ABSENT';
-  labId?: string;
-  labName?: string;
-  systemNumber?: number;
-}
-
+// --- Interfaces ---
 export interface StudentActivity {
   id: string;
   studentId: string;
@@ -28,109 +30,145 @@ export interface StudentActivity {
   status?: 'present' | 'late' | 'absent';
 }
 
-// Empty Data
-let ATTENDANCE_LOGS: AttendanceRecord[] = [];
-let ACTIVITIES: StudentActivity[] = [];
+export interface AttendanceRecord extends AttendanceLog {
+  labName?: string; // Helper for UI
+}
 
-export const getAttendanceLogs = (): AttendanceRecord[] => {
-  return [...ATTENDANCE_LOGS];
+// --- Helpers ---
+const mapDocToLog = (doc: any): AttendanceRecord => ({ id: doc.id, ...doc.data() });
+const mapDocToActivity = (doc: any): StudentActivity => ({ id: doc.id, ...doc.data() });
+
+// --- Attendance Functions ---
+
+export const getAttendanceLogs = async (): Promise<AttendanceRecord[]> => {
+  try {
+    const q = query(collection(db, ATTENDANCE_COLLECTION), orderBy('checkInTime', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(mapDocToLog);
+  } catch (error) {
+    console.error("Error fetching attendance:", error);
+    return [];
+  }
 };
 
-export const getStudentStatus = (studentId: string): { isCheckedIn: boolean, currentRecord: AttendanceRecord | null } => {
-  const activeRecord = ATTENDANCE_LOGS.find(r => r.studentId === studentId && r.checkOutTime === null);
-  return {
-    isCheckedIn: !!activeRecord,
-    currentRecord: activeRecord || null
-  };
+export const getLogsByStudent = async (studentId: string): Promise<AttendanceRecord[]> => {
+  try {
+    const q = query(
+      collection(db, ATTENDANCE_COLLECTION),
+      where('studentId', '==', studentId)
+    );
+    const snapshot = await getDocs(q);
+    // Sort in memory if index is missing, or use orderBy if index exists
+    return snapshot.docs
+      .map(mapDocToLog)
+      .sort((a, b) => new Date(b.checkInTime).getTime() - new Date(a.checkInTime).getTime());
+  } catch (error) {
+    return [];
+  }
 };
 
-export const checkInStudent = (user: User, labId: string, systemNumber: number): AttendanceRecord => {
-  const now = new Date();
-  const lab = LABS.find(l => l.id === labId);
-  const newRecord: AttendanceRecord = {
-    id: `att-${Date.now()}`,
+// Alias for getLogsByStudent to satisfy some components
+export const getStudentAttendance = getLogsByStudent;
+
+export const getStudentStatus = async (studentId: string): Promise<{ isCheckedIn: boolean, currentRecord: AttendanceRecord | null }> => {
+  try {
+    const q = query(
+      collection(db, ATTENDANCE_COLLECTION),
+      where('studentId', '==', studentId),
+      where('status', 'in', ['PRESENT', 'LATE'])
+    );
+    const snapshot = await getDocs(q);
+
+    // Find one that hasn't checked out
+    const activeDoc = snapshot.docs.find(d => !d.data().checkOutTime);
+
+    if (activeDoc) {
+      return { isCheckedIn: true, currentRecord: mapDocToLog(activeDoc) };
+    }
+    return { isCheckedIn: false, currentRecord: null };
+  } catch (error) {
+    return { isCheckedIn: false, currentRecord: null };
+  }
+};
+
+export const checkInStudent = async (user: User, labId: string, systemNumber: number): Promise<AttendanceRecord> => {
+  const newLog = {
     studentId: user.id,
     studentName: user.name,
-    course: user.course && user.semester ? `${user.course} - ${user.semester}` : 'General',
-    checkInTime: now.toISOString(),
-    checkOutTime: null,
-    date: now.toISOString().split('T')[0],
+    labId,
+    systemNumber,
+    checkInTime: new Date().toISOString(),
     status: 'PRESENT',
-    labId: labId,
-    labName: lab ? lab.name : 'Unknown Lab',
-    systemNumber: systemNumber
+    date: new Date().toLocaleDateString(),
+    labName: labId // Ideally fetch lab name, but ID works for now
   };
-  ATTENDANCE_LOGS.push(newRecord);
-  return newRecord;
+
+  const docRef = await addDoc(collection(db, ATTENDANCE_COLLECTION), newLog);
+  return { id: docRef.id, ...newLog } as any as AttendanceRecord;
 };
 
-// --- New: Manual Entry for Faculty ---
-export const manualCheckIn = (studentId: string, labId: string, status: 'PRESENT' | 'LATE'): AttendanceRecord => {
-  const student = MOCK_ROSTER.find(s => s.id === studentId);
-  const lab = LABS.find(l => l.id === labId);
-  const now = new Date();
-  
-  const newRecord: AttendanceRecord = {
-    id: `att-manual-${Date.now()}`,
-    studentId: studentId,
-    studentName: student?.name || 'Unknown Student',
-    course: 'Manual Entry',
-    checkInTime: now.toISOString(),
-    checkOutTime: null, // Still active
-    date: now.toISOString().split('T')[0],
+// NEW: Manual Entry for Faculty Dashboard
+export const manualCheckIn = async (studentId: string, labId: string, status: 'PRESENT' | 'LATE'): Promise<void> => {
+  // We need to fetch the student name for the log
+  let studentName = 'Unknown';
+  try {
+    const userDoc = await getDoc(doc(db, 'users', studentId));
+    if (userDoc.exists()) studentName = userDoc.data().name;
+  } catch (e) { console.error("Error fetching user for manual checkin", e); }
+
+  const newLog = {
+    studentId,
+    studentName,
+    labId,
+    systemNumber: 0, // Manual entry
+    checkInTime: new Date().toISOString(),
     status: status,
-    labId: labId,
-    labName: lab ? lab.name : 'Unknown Lab',
-    systemNumber: 0 // Indicates manual/no specific system
+    date: new Date().toLocaleDateString(),
+    labName: labId
   };
-  ATTENDANCE_LOGS.unshift(newRecord); // Add to top
-  return newRecord;
+
+  await addDoc(collection(db, ATTENDANCE_COLLECTION), newLog);
 };
 
-// --- New: Update/Correction for Admin ---
-export const updateAttendanceRecord = (id: string, updates: Partial<AttendanceRecord>): void => {
-  const index = ATTENDANCE_LOGS.findIndex(r => r.id === id);
-  if (index !== -1) {
-    ATTENDANCE_LOGS[index] = { ...ATTENDANCE_LOGS[index], ...updates };
+export const checkOutStudent = async (studentId: string): Promise<void> => {
+  const q = query(
+    collection(db, ATTENDANCE_COLLECTION),
+    where('studentId', '==', studentId),
+    where('status', 'in', ['PRESENT', 'LATE'])
+  );
+  const snapshot = await getDocs(q);
+  const activeDoc = snapshot.docs.find(d => !d.data().checkOutTime);
+
+  if (activeDoc) {
+    await updateDoc(doc(db, ATTENDANCE_COLLECTION, activeDoc.id), {
+      checkOutTime: new Date().toISOString(),
+      status: 'COMPLETED'
+    });
   }
 };
 
-export const deleteAttendanceRecord = (id: string): void => {
-  ATTENDANCE_LOGS = ATTENDANCE_LOGS.filter(r => r.id !== id);
+export const updateAttendanceRecord = async (logId: string, updates: Partial<AttendanceLog>): Promise<void> => {
+  await updateDoc(doc(db, ATTENDANCE_COLLECTION, logId), updates);
 };
 
-export const checkOutStudent = (studentId: string): AttendanceRecord | null => {
-  const recordIndex = ATTENDANCE_LOGS.findIndex(r => r.studentId === studentId && r.checkOutTime === null);
-  if (recordIndex !== -1) {
-    const now = new Date();
-    ATTENDANCE_LOGS[recordIndex].checkOutTime = now.toISOString();
-    ATTENDANCE_LOGS[recordIndex].status = 'COMPLETED';
-    return ATTENDANCE_LOGS[recordIndex];
-  }
-  return null;
+export const deleteAttendanceRecord = async (logId: string): Promise<void> => {
+  await deleteDoc(doc(db, ATTENDANCE_COLLECTION, logId));
 };
 
-export const getLogsByStudent = (studentId: string): AttendanceRecord[] => {
-  return ATTENDANCE_LOGS.filter(r => r.studentId === studentId).sort((a, b) => new Date(b.checkInTime).getTime() - new Date(a.checkInTime).getTime());
-};
+// --- Activity Functions ---
 
-export const getLogsByDate = (date: string): AttendanceRecord[] => {
-  return ATTENDANCE_LOGS.filter(r => r.date === date);
-};
-
-export const submitActivity = (
-  user: User, 
-  type: StudentActivity['activityType'], 
+export const submitActivity = async (
+  user: User,
+  type: StudentActivity['activityType'],
   payload: any
-): void => {
+): Promise<void> => {
   let status: 'present' | 'late' | undefined = undefined;
   if (type === 'checkin') {
     const nowMinutes = new Date().getMinutes();
     status = nowMinutes > 10 ? 'late' : 'present';
   }
 
-  const newActivity: StudentActivity = {
-    id: `act-${Date.now()}`,
+  const newActivity = {
     studentId: user.id,
     studentName: user.name,
     department: user.department || 'General',
@@ -138,16 +176,40 @@ export const submitActivity = (
     activityType: type,
     activityPayload: payload,
     timestamp: new Date().toISOString(),
-    status: status
+    status: status || 'present'
   };
-  
-  ACTIVITIES.unshift(newActivity);
-  console.log('[Background Activity Routing] Sent to Faculty:', newActivity);
+
+  try {
+    await addDoc(collection(db, ACTIVITIES_COLLECTION), newActivity);
+  } catch (e) {
+    console.error("Failed to log activity", e);
+  }
 };
 
-export const getActivitiesForFaculty = (department: string, managedSemesters: string[]): StudentActivity[] => {
-  return ACTIVITIES.filter(act => 
-    (act.department === department || department === 'Computer Science') && 
-    (managedSemesters.includes(act.semester))
-  ).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+// NEW: Activity Fetcher for Faculty Dashboard
+export const getActivitiesForFaculty = async (department: string, managedSemesters: string[]): Promise<StudentActivity[]> => {
+  try {
+    // 1. Fetch activities (filtering by department if possible, or fetch all recent)
+    // Note: Firestore 'in' queries are limited. We'll fetch by department if indexed, or all recent.
+    // For now, let's fetch recent 50 activities and filter in memory to be safe.
+    const q = query(
+      collection(db, ACTIVITIES_COLLECTION),
+      orderBy('timestamp', 'desc'),
+      limit(50)
+    );
+
+    const snapshot = await getDocs(q);
+    const allActivities = snapshot.docs.map(mapDocToActivity);
+
+    // 2. Filter by Semester
+    return allActivities.filter(act =>
+      // Match Department (Relaxed check for demo)
+      (act.department === department || !department) &&
+      // Match Semester
+      (managedSemesters && managedSemesters.includes(act.semester))
+    );
+  } catch (error) {
+    console.error("Error fetching activities:", error);
+    return [];
+  }
 };

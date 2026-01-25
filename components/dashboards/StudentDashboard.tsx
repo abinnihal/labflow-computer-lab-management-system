@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { User, Booking, Task } from '../../types';
-import { getStudentStatus, checkInStudent, checkOutStudent, AttendanceRecord, getLogsByStudent, submitActivity } from '../../services/attendanceService';
+import { User, Booking, Task, AttendanceLog } from '../../types';
+import {
+  getStudentStatus,
+  checkInStudent,
+  checkOutStudent,
+  getLogsByStudent,
+  submitActivity
+} from '../../services/attendanceService';
 import { getNextLabSession, getAllBookings } from '../../services/bookingService';
 import { getTasksForStudent } from '../../services/taskService';
 import { Link } from 'react-router-dom';
@@ -22,20 +28,18 @@ const MiniCalendar: React.FC = () => {
   const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
   const calendarDays = [];
 
-  // Empty slots
   for (let i = 0; i < firstDay; i++) {
     calendarDays.push(<div key={`empty-${i}`} className="h-8 w-8"></div>);
   }
 
-  // Actual days
   for (let i = 1; i <= daysInMonth; i++) {
     const isToday = i === today.getDate();
     calendarDays.push(
       <div
         key={i}
         className={`h-8 w-8 flex items-center justify-center text-xs rounded-full ${isToday
-            ? 'bg-blue-600 text-white font-bold shadow-md'
-            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+          ? 'bg-blue-600 text-white font-bold shadow-md'
+          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
           }`}
       >
         {i}
@@ -62,46 +66,40 @@ const MiniCalendar: React.FC = () => {
 };
 
 const StudentDashboard: React.FC<Props> = ({ user }) => {
-  // Attendance State
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [currentRecord, setCurrentRecord] = useState<AttendanceRecord | null>(null);
+  const [currentRecord, setCurrentRecord] = useState<AttendanceLog | null>(null);
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [attendanceAvg, setAttendanceAvg] = useState(0);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger to force re-calc
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [pendingTasks, setPendingTasks] = useState<Task[]>([]);
 
   useEffect(() => {
-    // WRAPPER FUNCTION FOR ASYNC CALLS
     const fetchDashboardData = async () => {
-      // 1. Status Check (Attendance service is currently local/sync)
-      const status = getStudentStatus(user.id);
+      // 1. Status Check (Now Async)
+      const status = await getStudentStatus(user.id);
       setIsCheckedIn(status.isCheckedIn);
       setCurrentRecord(status.currentRecord);
 
-      // 2. Attendance Avg Calculation (Now Async - needs await)
+      // 2. Attendance Avg
       try {
         const allBookings = await getAllBookings();
-
         const now = new Date();
         const pastBookings = allBookings.filter(b => {
-          // In a real app, match booking to student's course/batch
-          // For demo, we check generic or user specific bookings
-          return new Date(b.endTime) < now && (b.userId === user.id || b.userId === 'f-demo');
+          return new Date(b.endTime) < now && (b.userId === user.id);
         });
 
-        const logs = getLogsByStudent(user.id);
-        const completed = logs.filter(l => l.status === 'COMPLETED').length;
-        const totalSessions = Math.max(pastBookings.length, 1); // Avoid division by zero
+        const logs = await getLogsByStudent(user.id); // Async
+        const completed = logs.filter(l => l.status === 'COMPLETED' || l.status === 'PRESENT').length;
+        const totalSessions = Math.max(pastBookings.length, 1);
 
-        // If logs > expected (e.g. extra lab practice), cap at 100%
         setAttendanceAvg(Math.min(100, Math.round((completed / totalSessions) * 100)));
       } catch (error) {
-        console.error("Error fetching bookings for stats:", error);
+        console.error("Error fetching stats:", error);
       }
 
-      // 3. Get Next Lab (Now Async - needs await)
+      // 3. Next Lab
       try {
         const next = await getNextLabSession(user.id);
         setNextBooking(next);
@@ -109,47 +107,52 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         console.error("Error fetching next session:", error);
       }
 
-      // 4. Get Pending Tasks (Task service is currently sync)
-      const allTasks = getTasksForStudent(user.id);
-      const pending = allTasks
-        .filter(t => !t.submission || t.submission.status === 'REJECTED')
-        .map(t => t.task);
-      setPendingTasks(pending);
+      // 4. Pending Tasks (Async)
+      try {
+        const tasksData = await getTasksForStudent(user.id);
+        const pending = tasksData
+          .filter(t => !t.submission || t.submission.status === 'REJECTED')
+          .map(t => t.task);
+        setPendingTasks(pending);
+      } catch (error) {
+        console.error("Error fetching tasks:", error);
+      }
     };
 
     fetchDashboardData();
 
   }, [user.id, refreshTrigger]);
 
-  const handleToggleAttendance = () => {
+  const handleToggleAttendance = async () => {
     if (isCheckedIn) {
       setProcessing(true);
-      setTimeout(() => {
-        checkOutStudent(user.id);
-        // Background Activity Routing
-        submitActivity(user, 'checkout', {
+      try {
+        await checkOutStudent(user.id);
+        await submitActivity(user, 'checkout', {
           recordId: currentRecord?.id,
-          duration: '2h' // Mock duration calculation 
+          duration: '2h'
         });
 
         setIsCheckedIn(false);
         setCurrentRecord(null);
+        setRefreshTrigger(prev => prev + 1);
+      } catch (error) {
+        alert("Failed to checkout");
+      } finally {
         setProcessing(false);
-        setRefreshTrigger(prev => prev + 1); // Refresh stats
-      }, 1500);
+      }
     } else {
       setShowCheckInModal(true);
     }
   };
 
-  const processCheckIn = (labId: string, systemNumber: number) => {
+  const processCheckIn = async (labId: string, systemNumber: number) => {
     setProcessing(true);
     setShowCheckInModal(false);
-    setTimeout(() => {
-      const record = checkInStudent(user, labId, systemNumber);
+    try {
+      const record = await checkInStudent(user, labId, systemNumber);
 
-      // Background Activity Routing
-      submitActivity(user, 'checkin', {
+      await submitActivity(user, 'checkin', {
         labId,
         systemNumber,
         recordId: record.id
@@ -157,12 +160,14 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
       setIsCheckedIn(true);
       setCurrentRecord(record);
+      setRefreshTrigger(prev => prev + 1);
+    } catch (error) {
+      alert("Failed to check in");
+    } finally {
       setProcessing(false);
-      setRefreshTrigger(prev => prev + 1); // Refresh stats
-    }, 1500);
+    }
   };
 
-  // Data for Circular Progress
   const attendanceData = [
     { name: 'Attended', value: attendanceAvg, color: '#2563eb' },
     { name: 'Missed', value: 100 - attendanceAvg, color: '#e2e8f0' },
@@ -185,7 +190,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 transform skew-x-12"></div>
       </div>
 
-      {/* Active Class / Check In Card (Vital Feature) */}
+      {/* Active Class / Check In Card */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 transition-colors">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-4 w-full md:w-auto">
@@ -197,8 +202,8 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
                 {isCheckedIn ? 'Current Session Active' : 'Ready for Lab?'}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {isCheckedIn
-                  ? `Checked in at ${new Date(currentRecord!.checkInTime).toLocaleTimeString()}`
+                {isCheckedIn && currentRecord
+                  ? `Checked in at ${new Date(currentRecord.checkInTime).toLocaleTimeString()}`
                   : nextBooking
                     ? `Next: ${nextBooking.subject} at ${new Date(nextBooking.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                     : 'No upcoming lab sessions scheduled.'
@@ -211,7 +216,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
             onClick={handleToggleAttendance}
             disabled={processing}
             className={`w-full md:w-64 py-3.5 rounded-xl font-bold text-white shadow-md transition-all flex items-center justify-center gap-2 text-lg transform hover:scale-[1.02] ${processing ? 'bg-slate-400 dark:bg-slate-600 cursor-wait' :
-                isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : 'bg-green-600 hover:bg-green-700 shadow-green-500/20'
+              isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : 'bg-green-600 hover:bg-green-700 shadow-green-500/20'
               }`}
           >
             {processing ? (
@@ -228,7 +233,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
           <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 flex gap-6 text-sm">
             <div>
               <span className="text-slate-400 text-xs uppercase font-bold">Lab</span>
-              <p className="font-semibold text-slate-700 dark:text-slate-300">{currentRecord.labName}</p>
+              <p className="font-semibold text-slate-700 dark:text-slate-300">{currentRecord.labId}</p>
             </div>
             <div>
               <span className="text-slate-400 text-xs uppercase font-bold">System</span>
@@ -238,10 +243,9 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         )}
       </div>
 
-      {/* Main Grid: Attendance, Calendar, Tasks */}
+      {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto">
-
-        {/* 1. Attendance Average */}
+        {/* 1. Attendance Avg */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 flex flex-col items-center justify-center relative transition-colors">
           <h3 className="w-full text-left font-bold text-slate-800 dark:text-white mb-2">Attendance Avg</h3>
           <div className="h-40 w-40 relative">
@@ -272,12 +276,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
           <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-2">{getMotivationalText(attendanceAvg)}</p>
         </div>
 
-        {/* 2. Small Calendar */}
+        {/* 2. Calendar */}
         <div className="lg:h-full">
           <MiniCalendar />
         </div>
 
-        {/* 3. Pending Tasks */}
+        {/* 3. Tasks */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col transition-colors">
           <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
             <h3 className="font-bold text-slate-800 dark:text-white">Pending Tasks</h3>
@@ -307,7 +311,6 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
             )}
           </div>
         </div>
-
       </div>
 
       <CheckInModal

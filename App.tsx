@@ -107,7 +107,7 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
               <SidebarLink to="/dashboard/attendance" icon="fa-clock" label="Attendance" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Schedule" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/community" icon="fa-users" label="Community" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/ai-chat" icon="fa-robot" label="AI Assistant" onClick={() => setSidebarOpen(false)} />
+              <SidebarLink to="/dashboard/ai-chat" icon="fa-robot" label="Lab Assistant" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/support" icon="fa-headset" label="Support" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/profile" icon="fa-id-card" label="My Profile" onClick={() => setSidebarOpen(false)} />
             </>

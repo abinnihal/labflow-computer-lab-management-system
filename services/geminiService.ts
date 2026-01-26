@@ -1,38 +1,34 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ACADEMIC_SYSTEM_PROMPT } from '../constants';
 
-// Initialize Gemini Client
-// NOTE: In a real production app, this key should be proxied through a backend
-// to avoid exposing it to the client. For this demo, we assume process.env.API_KEY is available.
-const apiKey = process.env.API_KEY || ''; 
-let ai: GoogleGenAI | null = null;
+// Access the key safely from .env
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+let model: any = null;
 
 if (apiKey) {
-  ai = new GoogleGenAI({ apiKey });
+  const genAI = new GoogleGenerativeAI(apiKey);
+  // Using 'gemini-1.5-flash' because it is free, fast, and good at following instructions
+  model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction: ACADEMIC_SYSTEM_PROMPT
+  });
 }
 
-export const sendMessageToGemini = async (message: string, systemInstruction?: string): Promise<string> => {
-  if (!ai) {
-    // Fallback if no API key is present for the demo
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve("I'm the Lab Assistant AI. To enable my full capabilities, please configure the `API_KEY` in the environment. For now, I can tell you that the labs are open from 8 AM to 6 PM.");
-      }, 1000);
-    });
+export const sendMessageToAI = async (message: string): Promise<string> => {
+  // 1. Safety Check: If no key or model, return fallback immediately.
+  if (!model) {
+    console.warn("AI Key missing or model not initialized.");
+    return "⚠️ System Mode: AI is currently offline. Please refer to your Lab Manual for assistance.";
   }
 
   try {
-    const model = 'gemini-2.5-flash';
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: message,
-      config: {
-        systemInstruction: systemInstruction || "You are a helpful Lab Assistant for a Computer Lab Management System. Help students and faculty with scheduling, technical issues, and general inquiries.",
-      }
-    });
-    
-    return response.text || "I couldn't generate a response.";
+    // 2. The Real Call
+    const result = await model.generateContent(message);
+    const response = await result.response;
+    return response.text();
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Sorry, I'm having trouble connecting to the AI service right now.";
+    console.error("AI Service Error:", error);
+    return "I'm having trouble connecting to the knowledge base right now. Please consult your Faculty supervisor.";
   }
 };

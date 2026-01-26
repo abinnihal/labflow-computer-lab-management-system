@@ -117,7 +117,8 @@ export interface Task {
   priority: 'LOW' | 'MEDIUM' | 'HIGH';
   status: 'OPEN' | 'CLOSED';
   createdAt: string;
-  attachmentUrl?: string; // <--- NEW FIELD (Faculty uploads this)
+  attachmentUrl?: string; // (Faculty uploads this)
+  duration?: string;      // (Exam duration in minutes)
 }
 
 export interface Submission {

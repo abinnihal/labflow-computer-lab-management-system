@@ -16,6 +16,7 @@ const TASKS_COLLECTION = 'tasks';
 const SUBMISSIONS_COLLECTION = 'submissions';
 
 // --- Helpers ---
+// This automatically maps ALL fields (including the new 'duration') from Firestore
 const mapDocToTask = (doc: any): Task => ({ id: doc.id, ...doc.data() });
 const mapDocToSubmission = (doc: any): Submission => ({ id: doc.id, ...doc.data() });
 
@@ -29,7 +30,6 @@ export const getAllTasks = async (): Promise<Task[]> => {
   }
 };
 
-// --- FIX: Added Missing Export ---
 export const getAllSubmissions = async (): Promise<Submission[]> => {
   try {
     const snapshot = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
@@ -126,6 +126,8 @@ export const getSubmissionsForTask = async (taskId: string): Promise<Submission[
 };
 
 export const createTask = async (taskData: Omit<Task, 'id' | 'createdAt'>): Promise<Task> => {
+  // SPREAD OPERATOR NOTE: The '...taskData' line below automatically includes 'duration'
+  // if it was passed from the Faculty Page. No extra code needed!
   const newTask = {
     ...taskData,
     createdAt: new Date().toISOString()

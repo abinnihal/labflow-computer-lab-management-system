@@ -146,11 +146,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
     }
   };
 
-  const processCheckIn = async (labId: string, systemNumber: number) => {
+  const processCheckIn = async (labId: string, systemNumber: number, proofUrl: string) => {
     setProcessing(true);
     setShowCheckInModal(false);
     try {
-      const record = await checkInStudent(user, labId, systemNumber);
+      // Pass proofUrl to service
+      const record = await checkInStudent(user, labId, systemNumber, proofUrl);
 
       await submitActivity(user, 'checkin', {
         labId,
@@ -318,6 +319,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         onClose={() => setShowCheckInModal(false)}
         onCheckIn={processCheckIn}
         isLoading={processing}
+        user={user}
       />
     </div>
   );

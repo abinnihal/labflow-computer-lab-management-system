@@ -1,111 +1,124 @@
 import React, { useState, useEffect } from 'react';
-// FIX: Import from labService, not bookingService
 import { getAllLabs } from '../../services/labService';
-import { Lab } from '../../types';
+import { Lab, User } from '../../types';
+import SelfieCamera from './SelfieCamera';
+import { uploadSelfie } from '../../services/storageService';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onCheckIn: (labId: string, systemNumber: number) => void;
+  onCheckIn: (labId: string, systemNumber: number, proofUrl: string) => Promise<void>;
   isLoading: boolean;
+  user: User;
 }
 
-const CheckInModal: React.FC<Props> = ({ isOpen, onClose, onCheckIn, isLoading }) => {
-  // 1. Add State for Labs
+const CheckInModal: React.FC<Props> = ({ isOpen, onClose, onCheckIn, isLoading, user }) => {
   const [labs, setLabs] = useState<Lab[]>([]);
   const [selectedLab, setSelectedLab] = useState('');
-  const [systemNumber, setSystemNumber] = useState<string>('');
-  const [loadingLabs, setLoadingLabs] = useState(true);
+  const [systemNumber, setSystemNumber] = useState<string>('1'); // Use string for easier input handling
+  const [proofImage, setProofImage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  // 2. Fetch Labs from DB
   useEffect(() => {
-    const fetchLabs = async () => {
-      try {
-        const data = await getAllLabs();
-        setLabs(data);
-        if (data.length > 0) {
-          setSelectedLab(data[0].id);
-        }
-      } catch (error) {
-        console.error("Failed to load labs", error);
-      } finally {
-        setLoadingLabs(false);
-      }
-    };
-
     if (isOpen) {
-      fetchLabs();
+      loadLabs();
+      setProofImage(null);
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
-  const handleConfirm = () => {
-    if (!selectedLab || !systemNumber) return;
-    onCheckIn(selectedLab, parseInt(systemNumber));
+  const loadLabs = async () => {
+    const data = await getAllLabs();
+    setLabs(data);
+    if (data.length > 0) setSelectedLab(data[0].id);
   };
 
+  const handleSubmit = async () => {
+    if (!selectedLab || !proofImage || !systemNumber) return;
+
+    setUploading(true);
+    try {
+      const url = await uploadSelfie(proofImage);
+      await onCheckIn(selectedLab, parseInt(systemNumber), url);
+    } catch (error) {
+      alert("Upload failed. Please check internet connection.");
+      setUploading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md animate-fade-in-up overflow-hidden transition-colors">
-        <div className="bg-green-600 p-6 text-white">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <i className="fa-solid fa-right-to-bracket"></i> Lab Check-In
-          </h2>
-          <p className="text-green-100 text-sm">Please verify your workstation location.</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+
+        {/* Header */}
+        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800 dark:text-white">Lab Check-In</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Verify your presence</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+            <i className="fa-solid fa-xmark text-xl"></i>
+          </button>
         </div>
 
-        <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Select Lab</label>
-            {loadingLabs ? (
-              <div className="text-sm text-slate-500 animate-pulse">Loading labs...</div>
-            ) : (
+        {/* Scrollable Content */}
+        <div className="p-6 overflow-y-auto space-y-6">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Select Lab</label>
               <select
                 value={selectedLab}
                 onChange={(e) => setSelectedLab(e.target.value)}
-                className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:outline-none"
+                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-white font-medium outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               >
-                {labs.map(lab => (
-                  <option key={lab.id} value={lab.id}>{lab.name}</option>
-                ))}
+                {labs.map(lab => <option key={lab.id} value={lab.id}>{lab.name}</option>)}
               </select>
-            )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">System Number</label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <i className="fa-solid fa-desktop text-slate-400"></i>
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={systemNumber}
+                  onChange={(e) => setSystemNumber(e.target.value)}
+                  className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-white font-medium outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  placeholder="e.g. 15"
+                />
+              </div>
+            </div>
           </div>
+
+          <div className="border-t border-slate-100 dark:border-slate-700 my-4"></div>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">System Number</label>
-            <div className="relative">
-              <i className="fa-solid fa-desktop absolute left-3 top-3 text-slate-400"></i>
-              <input
-                type="number"
-                min="1"
-                max="100"
-                value={systemNumber}
-                onChange={(e) => setSystemNumber(e.target.value)}
-                placeholder="e.g. 12"
-                className="w-full border border-slate-300 dark:border-slate-600 rounded-lg pl-9 pr-3 py-2 focus:ring-2 focus:ring-green-500 focus:outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-              />
-            </div>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Look for the sticker on your CPU or Monitor.</p>
+            <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2 flex justify-between">
+              <span>Selfie Verification</span>
+              <span className="text-red-500 text-[10px]">* Required</span>
+            </label>
+            <SelfieCamera onCapture={setProofImage} onRetake={() => setProofImage(null)} />
           </div>
+        </div>
 
-          <div className="pt-4 flex gap-3">
-            <button
-              onClick={onClose}
-              className="flex-1 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={isLoading || !systemNumber || loadingLabs}
-              className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-md disabled:opacity-70 flex items-center justify-center gap-2 transition-colors"
-            >
-              {isLoading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}
-              Confirm Check-In
-            </button>
-          </div>
+        {/* Footer */}
+        <div className="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+          <button
+            onClick={handleSubmit}
+            disabled={isLoading || uploading || !proofImage || !systemNumber}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-3.5 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center gap-2"
+          >
+            {isLoading || uploading ? (
+              <><span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Verifying...</>
+            ) : (
+              <><i className="fa-solid fa-check-circle"></i> Confirm Presence</>
+            )}
+          </button>
         </div>
       </div>
     </div>

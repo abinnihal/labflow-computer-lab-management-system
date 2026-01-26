@@ -108,17 +108,16 @@ export interface Task {
   title: string;
   description: string;
   assignedBy: string;
-  assignedById: string;
+  assignedByName?: string; // Ensure this is here
+  assignedById: string;    // Ensure this is here
   course: string;
+  courseId?: string;
   dueDate: string;
   type: 'ASSIGNMENT' | 'LAB_EXAM' | 'PROJECT';
-  priority?: 'LOW' | 'MEDIUM' | 'HIGH';
-  instructions?: string;
-  hints?: string[];
-  questions?: string[];
-  attachments?: string[];
+  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  status: 'OPEN' | 'CLOSED';
   createdAt: string;
-  status?: string;
+  attachmentUrl?: string; // <--- NEW FIELD (Faculty uploads this)
 }
 
 export interface Submission {
@@ -185,6 +184,7 @@ export interface AttendanceLog {
   labId?: string;
   systemNumber?: number;
   date?: string;
+  proofUrl?: string;
 }
 
 export interface Notification {

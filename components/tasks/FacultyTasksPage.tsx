@@ -7,6 +7,7 @@ import {
    updateSubmissionStatus,
    getTaskStats
 } from '../../services/taskService';
+import { uploadAssignment } from '../../services/storageService'; // <--- NEW IMPORT
 
 interface Props {
    user: User;
@@ -33,6 +34,9 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
       type: 'ASSIGNMENT',
       priority: 'MEDIUM'
    });
+
+   // NEW: File Upload State
+   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
    const [isSubmitting, setIsSubmitting] = useState(false);
 
    useEffect(() => {
@@ -58,19 +62,31 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
       setIsSubmitting(true);
 
       try {
+         let uploadedUrl = '';
+
+         // 1. Upload File if selected
+         if (attachmentFile) {
+            const result = await uploadAssignment(attachmentFile);
+            uploadedUrl = result.url;
+         }
+
+         // 2. Create Task with URL
          await createTask({
             ...newTask as any,
             assignedById: user.id,
             assignedByName: user.name,
             status: 'OPEN',
-            courseId: 'BCA-V' // In a real app, select course dynamically
+            courseId: 'BCA-V', // In a real app, select course dynamically
+            attachmentUrl: uploadedUrl // <--- Save the URL
          });
 
          setIsCreateModalOpen(false);
          setNewTask({ title: '', description: '', dueDate: '', type: 'ASSIGNMENT', priority: 'MEDIUM' });
+         setAttachmentFile(null); // Reset file
          refreshTasks();
       } catch (error) {
          console.error("Failed to create task", error);
+         alert("Failed to create task. If uploading a file, check your connection.");
       } finally {
          setIsSubmitting(false);
       }
@@ -128,7 +144,15 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                         <div key={task.id} className="bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 hover:border-blue-400 transition-colors cursor-pointer group" onClick={() => openGrading(task)}>
                            <div className="flex justify-between items-start mb-2">
                               <div>
-                                 <h3 className="font-bold text-slate-800 dark:text-white group-hover:text-blue-600 transition-colors">{task.title}</h3>
+                                 <h3 className="font-bold text-slate-800 dark:text-white group-hover:text-blue-600 transition-colors">
+                                    {task.title}
+                                    {/* Attachment Icon */}
+                                    {task.attachmentUrl && (
+                                       <span className="ml-2 text-xs text-slate-400" title="Has Attachment">
+                                          <i className="fa-solid fa-paperclip"></i>
+                                       </span>
+                                    )}
+                                 </h3>
                                  <p className="text-xs text-slate-500 dark:text-slate-400">Due: {new Date(task.dueDate).toLocaleDateString()}</p>
                               </div>
                               <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${task.type === 'LAB_EXAM' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}>{task.type}</span>
@@ -156,8 +180,22 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                   {selectedTaskForGrading ? (
                      <>
                         <div className="mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
-                           <h2 className="text-xl font-bold text-slate-800 dark:text-white">{selectedTaskForGrading.title}</h2>
-                           <p className="text-sm text-slate-500 dark:text-slate-400">Submissions Review</p>
+                           <div className="flex justify-between items-start">
+                              <div>
+                                 <h2 className="text-xl font-bold text-slate-800 dark:text-white">{selectedTaskForGrading.title}</h2>
+                                 <p className="text-sm text-slate-500 dark:text-slate-400">Submissions Review</p>
+                              </div>
+                              {selectedTaskForGrading.attachmentUrl && (
+                                 <a
+                                    href={selectedTaskForGrading.attachmentUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-xs bg-blue-100 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-200 transition-colors"
+                                 >
+                                    <i className="fa-solid fa-download mr-1"></i> View Attachment
+                                 </a>
+                              )}
+                           </div>
                         </div>
 
                         <div className="space-y-3">
@@ -171,8 +209,27 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                                        <span className="text-xs font-mono text-slate-500">{new Date(sub.submittedAt).toLocaleTimeString()}</span>
                                     </div>
 
-                                    <div className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-sm font-mono text-slate-600 dark:text-slate-300 mb-3 overflow-x-auto">
-                                       {sub.textResponse || "File uploaded"}
+                                    {/* Submission Content */}
+                                    <div className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-sm text-slate-600 dark:text-slate-300 mb-3 overflow-hidden">
+                                       {sub.textResponse && <p className="mb-2">{sub.textResponse}</p>}
+                                       {sub.files && sub.files.length > 0 && (
+                                          <div className="flex gap-2 mt-2">
+                                             {sub.files.map((fileUrl, idx) => (
+                                                <a
+                                                   key={idx}
+                                                   href={fileUrl}
+                                                   target="_blank"
+                                                   rel="noreferrer"
+                                                   className="flex items-center gap-1 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1 rounded hover:text-blue-600"
+                                                >
+                                                   <i className="fa-solid fa-file-arrow-down"></i> File {idx + 1}
+                                                </a>
+                                             ))}
+                                          </div>
+                                       )}
+                                       {!sub.textResponse && (!sub.files || sub.files.length === 0) && (
+                                          <span className="italic opacity-50">Empty submission</span>
+                                       )}
                                     </div>
 
                                     <div className="flex gap-2">
@@ -216,6 +273,17 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Description</label>
                         <textarea value={newTask.description} onChange={e => setNewTask({ ...newTask, description: e.target.value })} className="w-full border border-slate-300 dark:border-slate-600 rounded px-3 py-2 dark:bg-slate-700 dark:text-white h-24"></textarea>
                      </div>
+
+                     {/* FILE UPLOAD INPUT */}
+                     <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Attachment (PDF/ZIP)</label>
+                        <input
+                           type="file"
+                           onChange={e => setAttachmentFile(e.target.files ? e.target.files[0] : null)}
+                           className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                        />
+                     </div>
+
                      <div className="grid grid-cols-2 gap-4">
                         <div>
                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Due Date</label>
@@ -232,8 +300,13 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                      </div>
                      <div className="flex justify-end gap-3 mt-4">
                         <button onClick={() => setIsCreateModalOpen(false)} className="px-4 py-2 text-slate-600 dark:text-slate-300 font-bold">Cancel</button>
-                        <button onClick={handleCreateTask} disabled={isSubmitting || !newTask.title} className="px-4 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50">
-                           {isSubmitting ? 'Creating...' : 'Create Task'}
+                        <button
+                           onClick={handleCreateTask}
+                           disabled={isSubmitting || !newTask.title}
+                           className="px-4 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                        >
+                           {isSubmitting && <i className="fa-solid fa-circle-notch fa-spin"></i>}
+                           {isSubmitting ? 'Uploading...' : 'Create Task'}
                         </button>
                      </div>
                   </div>

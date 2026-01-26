@@ -91,7 +91,13 @@ export const getStudentStatus = async (studentId: string): Promise<{ isCheckedIn
   }
 };
 
-export const checkInStudent = async (user: User, labId: string, systemNumber: number): Promise<AttendanceRecord> => {
+export const checkInStudent = async (
+  user: User,
+  labId: string,
+  systemNumber: number,
+  proofUrl?: string // <--- New Parameter
+): Promise<AttendanceLog> => {
+
   const newLog = {
     studentId: user.id,
     studentName: user.name,
@@ -100,11 +106,13 @@ export const checkInStudent = async (user: User, labId: string, systemNumber: nu
     checkInTime: new Date().toISOString(),
     status: 'PRESENT',
     date: new Date().toLocaleDateString(),
-    labName: labId // Ideally fetch lab name, but ID works for now
+    labName: labId,
+    proofUrl: proofUrl || '' // <--- Saving to Database
   };
 
+  // Cast to 'any' briefly to avoid type conflict if types.ts isn't fully refreshed by VS Code yet
   const docRef = await addDoc(collection(db, ATTENDANCE_COLLECTION), newLog);
-  return { id: docRef.id, ...newLog } as any as AttendanceRecord;
+  return { id: docRef.id, ...newLog } as any as AttendanceLog;
 };
 
 // NEW: Manual Entry for Faculty Dashboard

@@ -15,7 +15,7 @@ interface Props {
   user: User;
 }
 
-// Course Mapping based on Department & Level (Mock Data Structure preserved for UI logic)
+// Course Mapping based on Department & Level
 const COURSES_BY_LEVEL: Record<string, Record<string, string[]>> = {
   'Computer Science': {
     UG: ['BCA', 'B.Sc CS', 'B.Tech CSE'],
@@ -25,18 +25,30 @@ const COURSES_BY_LEVEL: Record<string, Record<string, string[]>> = {
     UG: ['B.Tech IT', 'B.Sc IT'],
     PG: ['M.Tech IT', 'M.Sc IT']
   },
-  // Fallback for demo
   'default': {
     UG: ['BCA', 'B.Sc'],
     PG: ['MCA', 'M.Sc']
   }
 };
 
+// Helper Interface for Grouping
+interface LabSession {
+  id: string;
+  labName: string;
+  date: string;
+  totalStudents: number;
+  logs: AttendanceRecord[];
+}
+
 const FacultyDashboard: React.FC<Props> = ({ user }) => {
   const [schedule, setSchedule] = useState<GCalEvent[]>([]);
   const [loadingSchedule, setLoadingSchedule] = useState(true);
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceRecord[]>([]);
   const [studentActivities, setStudentActivities] = useState<StudentActivity[]>([]);
+
+  // New State for Session View & Proofs
+  const [selectedSessionId, setSelectedSessionId] = useState<string>('');
+  const [proofModalUrl, setProofModalUrl] = useState<string | null>(null);
 
   // Real-time Stats
   const [pendingGrading, setPendingGrading] = useState(0);
@@ -75,7 +87,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
     }
   }, [availableCourses]);
 
-  // Set default semester when course changes (or managedSemesters load)
+  // Set default semester
   useEffect(() => {
     if (user.managedSemesters && user.managedSemesters.length > 0) {
       setSelectedSemester(user.managedSemesters[0]);
@@ -99,24 +111,25 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
       setSchedule(todaysEvents.length > 0 ? todaysEvents : events.slice(0, 3));
       setLoadingSchedule(false);
 
-      // 2. Load Attendance & Labs (ASYNC FIX: Added 'await')
+      // 2. Load Attendance & Labs
       const logs = await getAttendanceLogs();
-      setAttendanceLogs(logs || []);
+      const safeLogs = Array.isArray(logs) ? logs : [];
+      setAttendanceLogs(safeLogs);
 
       const labsData = await getAllLabs();
       setLabs(labsData || []);
 
-      // 3. Load Student Activities (ASYNC FIX: Added 'await')
+      // 3. Load Student Activities
       if (user.department && user.managedSemesters) {
         const acts = await getActivitiesForFaculty(user.department, user.managedSemesters);
         setStudentActivities(acts || []);
       }
 
-      // 4. Check pending students (ASYNC FIX)
+      // 4. Check pending students
       const pendingStudents = await getPendingUsersByRole(UserRole.STUDENT, user.department, user.managedSemesters);
       setPendingCount(pendingStudents.length);
 
-      // 5. Load Task & Issue Stats (ASYNC FIX: Added 'await')
+      // 5. Load Task & Issue Stats
       const gradingCount = await getPendingSubmissionsCount(user.id);
       setPendingGrading(gradingCount);
 
@@ -132,10 +145,46 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
     if (manualEntryData.studentId && manualEntryData.labId) {
       await manualCheckIn(manualEntryData.studentId, manualEntryData.labId, manualEntryData.status);
       setIsManualEntryOpen(false);
-      refreshData(); // Reload logs
+      refreshData();
       setManualEntryData({ studentId: '', labId: labs[0]?.id || '', status: 'PRESENT' });
     }
   };
+
+  // --- NEW: Group Logs into Sessions ---
+  const sessions = useMemo(() => {
+    const groups: Record<string, LabSession> = {};
+
+    attendanceLogs.forEach(log => {
+      // Key: Date + Lab Name ensures unique sessions per day per lab
+      const dateKey = new Date(log.checkInTime).toLocaleDateString();
+      const key = `${dateKey}-${log.labId}`;
+
+      if (!groups[key]) {
+        groups[key] = {
+          id: key,
+          labName: log.labId || 'General Lab', // You can map ID to Name using 'labs' state if needed
+          date: dateKey,
+          totalStudents: 0,
+          logs: []
+        };
+      }
+
+      groups[key].logs.push(log);
+      groups[key].totalStudents++;
+    });
+
+    // Sort: Newest Date first
+    return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [attendanceLogs]);
+
+  // Auto-select the first session on load
+  useEffect(() => {
+    if (sessions.length > 0 && !selectedSessionId) {
+      setSelectedSessionId(sessions[0].id);
+    }
+  }, [sessions]);
+
+  const currentSession = sessions.find(s => s.id === selectedSessionId);
 
   // Dynamic Graph Data from logs
   const graphData = useMemo(() => {
@@ -150,11 +199,9 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
         }
       });
     }
-    // Filter out weekends for the view
     return dataMap.filter((_, i) => i !== 0 && i !== 6);
   }, [attendanceLogs]);
 
-  // Helper to get active utilization per lab
   const getLabUtilization = (labId: string) => {
     return Array.isArray(attendanceLogs)
       ? attendanceLogs.filter(l => l.labId === labId && l.status === 'PRESENT').length
@@ -163,6 +210,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Faculty Dashboard</h1>
@@ -228,22 +276,14 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
           </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-700">
             {studentActivities.length === 0 ? (
-              <div className="p-12 text-center text-slate-400 dark:text-slate-500 italic">No activity recorded for your assigned semesters.</div>
+              <div className="p-12 text-center text-slate-400 dark:text-slate-500 italic">No activity recorded.</div>
             ) : (
               studentActivities.map(act => (
                 <div key={act.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                   <div className="flex justify-between items-start">
                     <div className="flex gap-4 items-center">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${act.activityType === 'checkin' ? 'bg-green-100 dark:bg-green-900/30 text-green-600' :
-                        act.activityType === 'checkout' ? 'bg-red-100 dark:bg-red-900/30 text-red-600' :
-                          act.activityType === 'task' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' :
-                            'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
-                        }`}>
-                        <i className={`fa-solid ${act.activityType === 'checkin' ? 'fa-arrow-right-to-bracket' :
-                          act.activityType === 'checkout' ? 'fa-arrow-right-from-bracket' :
-                            act.activityType === 'task' ? 'fa-file-lines' :
-                              'fa-comment-dots'
-                          }`}></i>
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${act.activityType === 'checkin' ? 'bg-green-100 dark:bg-green-900/30 text-green-600' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600'}`}>
+                        <i className={`fa-solid ${act.activityType === 'checkin' ? 'fa-arrow-right-to-bracket' : 'fa-file-lines'}`}></i>
                       </div>
                       <div>
                         <h4 className="font-bold text-slate-800 dark:text-white text-sm">{act.studentName}</h4>
@@ -252,18 +292,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-slate-400 font-mono">{new Date(act.timestamp).toLocaleTimeString()}</p>
-                      {act.status && (
-                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${act.status === 'present' ? 'bg-green-100 dark:bg-green-900/30 text-green-700' :
-                          act.status === 'late' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700' :
-                            'bg-red-100 dark:bg-red-900/30 text-red-700'
-                          }`}>
-                          {act.status}
-                        </span>
-                      )}
                     </div>
-                  </div>
-                  <div className="mt-2 ml-14 bg-slate-50 dark:bg-slate-900/30 p-2 rounded text-xs text-slate-600 dark:text-slate-300 font-mono border border-slate-100 dark:border-slate-800">
-                    {JSON.stringify(act.activityPayload)}
                   </div>
                 </div>
               ))
@@ -294,61 +323,25 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Attendance Monitor Section */}
+
+            {/* Graph Section (Preserved) */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                   <h3 className="font-bold text-slate-800 dark:text-white">Class Attendance Overview</h3>
-
-                  {/* Updated Class Selector UI */}
+                  {/* Selectors */}
                   <div className="flex flex-wrap items-center gap-2">
                     {user.programType === 'BOTH' && (
                       <div className="bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5 flex">
-                        <button
-                          onClick={() => setSelectedLevel('UG')}
-                          className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedLevel === 'UG' ? 'bg-white dark:bg-slate-600 shadow text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'}`}
-                        >
-                          UG
-                        </button>
-                        <button
-                          onClick={() => setSelectedLevel('PG')}
-                          className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedLevel === 'PG' ? 'bg-white dark:bg-slate-600 shadow text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'}`}
-                        >
-                          PG
-                        </button>
+                        <button onClick={() => setSelectedLevel('UG')} className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedLevel === 'UG' ? 'bg-white dark:bg-slate-600 shadow text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'}`}>UG</button>
+                        <button onClick={() => setSelectedLevel('PG')} className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedLevel === 'PG' ? 'bg-white dark:bg-slate-600 shadow text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'}`}>PG</button>
                       </div>
                     )}
-
-                    {/* Course Selector */}
-                    <select
-                      value={selectedCourse}
-                      onChange={(e) => setSelectedCourse(e.target.value)}
-                      className="text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-slate-600 px-2 py-1 outline-none max-w-[120px]"
-                      disabled={availableCourses.length === 0}
-                    >
-                      {availableCourses.length > 0 ? (
-                        availableCourses.map(course => (
-                          <option key={course} value={course}>{course}</option>
-                        ))
-                      ) : (
-                        <option value="">No Courses</option>
-                      )}
+                    <select value={selectedCourse} onChange={(e) => setSelectedCourse(e.target.value)} className="text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-slate-600 px-2 py-1 outline-none max-w-[120px]" disabled={availableCourses.length === 0}>
+                      {availableCourses.length > 0 ? availableCourses.map(c => <option key={c} value={c}>{c}</option>) : <option value="">No Courses</option>}
                     </select>
-
-                    {/* Semester Selector */}
-                    <select
-                      value={selectedSemester}
-                      onChange={(e) => setSelectedSemester(e.target.value)}
-                      className="text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-slate-600 px-2 py-1 outline-none"
-                      disabled={!user.managedSemesters || user.managedSemesters.length === 0}
-                    >
-                      {user.managedSemesters && user.managedSemesters.length > 0 ? (
-                        user.managedSemesters.map(sem => (
-                          <option key={sem} value={sem}>{sem} Sem</option>
-                        ))
-                      ) : (
-                        <option value="">No Semesters</option>
-                      )}
+                    <select value={selectedSemester} onChange={(e) => setSelectedSemester(e.target.value)} className="text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-slate-600 px-2 py-1 outline-none" disabled={!user.managedSemesters || user.managedSemesters.length === 0}>
+                      {user.managedSemesters && user.managedSemesters.length > 0 ? user.managedSemesters.map(s => <option key={s} value={s}>{s} Sem</option>) : <option value="">No Semesters</option>}
                     </select>
                   </div>
                 </div>
@@ -359,10 +352,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.2} />
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
-                      <Tooltip
-                        cursor={{ fill: 'transparent' }}
-                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: '#fff', color: '#1e293b' }}
-                      />
+                      <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: '#fff', color: '#1e293b' }} />
                       <Legend />
                       <Bar dataKey="present" name="Present" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={20} />
                       <Bar dataKey="absent" name="Absent" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
@@ -371,46 +361,82 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                 </div>
               </div>
 
-              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden transition-colors">
-                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
-                  <h3 className="font-bold text-slate-800 dark:text-white">Recent Check-ins (Live)</h3>
-                  <button className="text-sm text-blue-600 dark:text-blue-400 font-medium hover:underline">View All Logs</button>
+              {/* NEW: Categorized Session View (Replaces old table) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+
+                {/* LEFT: Session List */}
+                <div className="md:col-span-1 border-r border-slate-200 dark:border-slate-700 overflow-y-auto max-h-[400px]">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
+                    Past Sessions
+                  </div>
+                  {sessions.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-slate-400">No sessions recorded yet.</div>
+                  ) : (
+                    sessions.map(session => (
+                      <div
+                        key={session.id}
+                        onClick={() => setSelectedSessionId(session.id)}
+                        className={`p-4 border-b border-slate-100 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${selectedSessionId === session.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-500' : ''}`}
+                      >
+                        <h4 className="font-bold text-sm text-slate-800 dark:text-white">{session.labName}</h4>
+                        <div className="flex justify-between items-center mt-1">
+                          <span className="text-xs text-slate-500">{session.date}</span>
+                          <span className="text-[10px] bg-slate-200 dark:bg-slate-700 px-1.5 rounded text-slate-600 dark:text-slate-300">{session.totalStudents} Students</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50/50 dark:bg-slate-800 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                      <tr>
-                        <th className="px-6 py-3">Student Name</th>
-                        <th className="px-6 py-3">Check In</th>
-                        <th className="px-6 py-3">Check Out</th>
-                        <th className="px-6 py-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {attendanceLogs.slice(0, 5).map(log => (
-                        <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                          <td className="px-6 py-3 text-sm font-medium text-slate-700 dark:text-slate-200">{log.studentName}</td>
-                          <td className="px-6 py-3 text-sm text-slate-600 dark:text-slate-400 font-mono text-xs">{new Date(log.checkInTime).toLocaleTimeString()}</td>
-                          <td className="px-6 py-3 text-sm text-slate-600 dark:text-slate-400 font-mono text-xs">{log.checkOutTime ? new Date(log.checkOutTime).toLocaleTimeString() : '-'}</td>
-                          <td className="px-6 py-3">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${log.status === 'PRESENT' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}>
-                              {log.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                      {attendanceLogs.length === 0 && (
+
+                {/* RIGHT: Detailed Table */}
+                <div className="md:col-span-2 overflow-y-auto max-h-[400px]">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300 flex justify-between">
+                    <span>{currentSession ? currentSession.labName : 'Select a Session'}</span>
+                    {currentSession && <span className="text-xs font-normal text-slate-500 pt-1">{currentSession.date}</span>}
+                  </div>
+
+                  {!currentSession ? (
+                    <div className="p-10 text-center text-slate-400 italic">Select a session from the left to view attendance.</div>
+                  ) : (
+                    <table className="w-full text-left">
+                      <thead className="bg-slate-50/50 dark:bg-slate-800/50 text-xs font-semibold text-slate-500 uppercase">
                         <tr>
-                          <td colSpan={4} className="px-6 py-8 text-center text-slate-400 dark:text-slate-500 italic">No live check-ins.</td>
+                          <th className="px-4 py-2">Student</th>
+                          <th className="px-4 py-2">Time</th>
+                          <th className="px-4 py-2">Proof</th>
+                          <th className="px-4 py-2">Status</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {currentSession.logs.map(log => (
+                          <tr key={log.id} className="text-sm hover:bg-slate-50 dark:hover:bg-slate-700/20">
+                            <td className="px-4 py-3 font-medium text-slate-700 dark:text-slate-200">{log.studentName || 'Unknown'}</td>
+                            <td className="px-4 py-3 font-mono text-xs text-slate-500">{new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                            <td className="px-4 py-3">
+                              {log.proofUrl ? (
+                                <button
+                                  onClick={() => setProofModalUrl(log.proofUrl || null)}
+                                  className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-1 rounded font-bold border border-blue-200 dark:border-blue-800 hover:bg-blue-200 transition-colors flex items-center gap-1"
+                                >
+                                  <i className="fa-solid fa-image"></i> View
+                                </button>
+                              ) : <span className="text-xs text-slate-400 italic">No Proof</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${log.status === 'PRESENT' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                                {log.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Today's Schedule & Quick Stats */}
+            {/* Right Column: Schedule & Stats (Preserved) */}
             <div className="space-y-6">
               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
                 <div className="flex justify-between items-center mb-4">
@@ -419,25 +445,17 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                     <i className="fa-brands fa-google"></i> Synced
                   </span>
                 </div>
-
                 {loadingSchedule ? (
                   <div className="space-y-4 animate-pulse">
-                    {[1, 2, 3].map(i => (
-                      <div key={i} className="flex gap-4">
-                        <div className="w-10 h-10 bg-slate-100 dark:bg-slate-700 rounded"></div>
-                        <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded h-10"></div>
-                      </div>
-                    ))}
+                    {[1, 2, 3].map(i => <div key={i} className="h-10 bg-slate-100 dark:bg-slate-700 rounded"></div>)}
                   </div>
                 ) : (
                   <div className="space-y-4">
                     {schedule.map((event, idx) => (
                       <div key={event.id} className="flex gap-4 group">
                         <div className="flex flex-col items-center min-w-[3rem]">
-                          <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                            {event.start.dateTime ? new Date(event.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day'}
-                          </span>
-                          {idx !== schedule.length - 1 && <div className="h-full w-0.5 bg-slate-200 dark:bg-slate-700 my-1 group-hover:bg-blue-200 dark:group-hover:bg-blue-800 transition-colors"></div>}
+                          <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{event.start.dateTime ? new Date(event.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day'}</span>
+                          {idx !== schedule.length - 1 && <div className="h-full w-0.5 bg-slate-200 dark:bg-slate-700 my-1"></div>}
                         </div>
                         <div className={`p-3 rounded-r-lg w-full border-l-4 ${idx % 2 === 0 ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500' : 'bg-purple-50 dark:bg-purple-900/20 border-purple-500'}`}>
                           <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm">{event.summary}</h4>
@@ -445,7 +463,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                         </div>
                       </div>
                     ))}
-                    {schedule.length === 0 && <p className="text-sm text-slate-500 italic">No events scheduled for today.</p>}
+                    {schedule.length === 0 && <p className="text-sm text-slate-500 italic">No events today.</p>}
                   </div>
                 )}
               </div>
@@ -459,14 +477,14 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                     return (
                       <div key={lab.id}>
                         <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-                          <span>{lab.name.split('-')[0]} Cap.</span>
+                          <span>{lab.name.split('-')[0]}</span>
                           <span>{active}/{lab.capacity}</span>
                         </div>
                         <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5">
                           <div className={`h-1.5 rounded-full ${percentage > 80 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${percentage}%` }}></div>
                         </div>
                       </div>
-                    );
+                    )
                   })}
                   {labs.length === 0 && <p className="text-xs text-slate-400 italic">No labs configured.</p>}
                 </div>
@@ -477,14 +495,10 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
       )}
 
       {isBookingModalOpen && (
-        <BookingModal
-          isOpen={isBookingModalOpen}
-          onClose={() => setIsBookingModalOpen(false)}
-          user={user}
-        />
+        <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} user={user} />
       )}
 
-      {/* Manual Entry Modal */}
+      {/* Manual Entry Modal (Preserved) */}
       {isManualEntryOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in-up">
@@ -495,50 +509,41 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Student</label>
-                <select
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded px-3 py-2 text-sm dark:bg-slate-700 dark:text-white"
-                  value={manualEntryData.studentId}
-                  onChange={(e) => setManualEntryData({ ...manualEntryData, studentId: e.target.value })}
-                >
+                <select className="w-full border border-slate-300 dark:border-slate-600 rounded px-3 py-2 text-sm dark:bg-slate-700 dark:text-white" value={manualEntryData.studentId} onChange={(e) => setManualEntryData({ ...manualEntryData, studentId: e.target.value })}>
                   <option value="">Select Student</option>
-                  {MOCK_ROSTER.map(s => <option key={s.id} value={s.id}>{s.name} ({s.email})</option>)}
+                  {MOCK_ROSTER.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Lab</label>
-                <select
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded px-3 py-2 text-sm dark:bg-slate-700 dark:text-white"
-                  value={manualEntryData.labId}
-                  onChange={(e) => setManualEntryData({ ...manualEntryData, labId: e.target.value })}
-                >
+                <select className="w-full border border-slate-300 dark:border-slate-600 rounded px-3 py-2 text-sm dark:bg-slate-700 dark:text-white" value={manualEntryData.labId} onChange={(e) => setManualEntryData({ ...manualEntryData, labId: e.target.value })}>
                   <option value="">Select Lab</option>
                   {labs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Status</label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setManualEntryData({ ...manualEntryData, status: 'PRESENT' })}
-                    className={`flex-1 py-2 text-sm font-bold rounded ${manualEntryData.status === 'PRESENT' ? 'bg-green-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}
-                  >
-                    Present
-                  </button>
-                  <button
-                    onClick={() => setManualEntryData({ ...manualEntryData, status: 'LATE' })}
-                    className={`flex-1 py-2 text-sm font-bold rounded ${manualEntryData.status === 'LATE' ? 'bg-orange-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}
-                  >
-                    Late
-                  </button>
-                </div>
+              <div className="flex gap-2">
+                <button onClick={() => setManualEntryData({ ...manualEntryData, status: 'PRESENT' })} className={`flex-1 py-2 text-sm font-bold rounded ${manualEntryData.status === 'PRESENT' ? 'bg-green-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600'}`}>Present</button>
+                <button onClick={() => setManualEntryData({ ...manualEntryData, status: 'LATE' })} className={`flex-1 py-2 text-sm font-bold rounded ${manualEntryData.status === 'LATE' ? 'bg-orange-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600'}`}>Late</button>
               </div>
-              <button
-                onClick={handleManualCheckIn}
-                disabled={!manualEntryData.studentId || !manualEntryData.labId}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg shadow-sm disabled:opacity-50 mt-2"
-              >
-                Mark Attendance
-              </button>
+              <button onClick={handleManualCheckIn} disabled={!manualEntryData.studentId || !manualEntryData.labId} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg shadow-sm disabled:opacity-50 mt-2">Mark Attendance</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: Proof Viewer Modal */}
+      {proofModalUrl && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in" onClick={() => setProofModalUrl(null)}>
+          <div className="relative max-w-lg w-full bg-white dark:bg-slate-800 p-2 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setProofModalUrl(null)}
+              className="absolute -top-4 -right-4 bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-red-700 transition-colors"
+            >
+              <i className="fa-solid fa-xmark"></i>
+            </button>
+            <img src={proofModalUrl} alt="Attendance Proof" className="w-full h-auto rounded-xl" />
+            <div className="p-3 text-center">
+              <p className="text-xs text-slate-500 font-mono">Verified via Cloudinary</p>
             </div>
           </div>
         </div>

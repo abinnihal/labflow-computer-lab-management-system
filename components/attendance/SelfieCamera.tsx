@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import * as faceapi from 'face-api.js';
 
 interface Props {
     onCapture: (base64Image: string) => void;
@@ -11,92 +12,110 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [capturedImage, setCapturedImage] = useState<string | null>(null);
     const [error, setError] = useState<string>('');
+    const [isModelLoaded, setIsModelLoaded] = useState(false);
+    const [isScanning, setIsScanning] = useState(false);
 
+    // 1. Load AI Models on Mount
     useEffect(() => {
+        const loadModels = async () => {
+            try {
+                // Load the Tiny Face Detector (lightweight & fast)
+                // Ensure you have these files in public/models
+                await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+                setIsModelLoaded(true);
+            } catch (err) {
+                console.error("AI Model Load Failed:", err);
+                setError("Failed to load AI face detection. Please refresh.");
+            }
+        };
+        loadModels();
+
         startCamera();
-        // Cleanup function to stop camera when component unmounts
         return () => stopCamera();
     }, []);
 
     const startCamera = async () => {
         try {
-            // Constraints for mobile: prefer front camera
             const constraints = {
                 video: {
                     facingMode: "user",
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
+                    width: { ideal: 640 }, // Lower res is faster for AI
+                    height: { ideal: 480 }
                 }
             };
-
             const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
             setStream(mediaStream);
-
             if (videoRef.current) {
                 videoRef.current.srcObject = mediaStream;
             }
             setError('');
         } catch (err) {
-            console.error(err);
-            setError("Camera access denied. Please allow permissions in your browser settings.");
+            setError("Camera access denied. Please allow permissions.");
         }
     };
 
     const stopCamera = () => {
         if (stream) {
-            // 1. Stop all tracks (Video/Audio)
             stream.getTracks().forEach(track => track.stop());
-            // 2. Clear state
             setStream(null);
         }
-        // 3. Clear video source
-        if (videoRef.current) {
-            videoRef.current.srcObject = null;
-        }
+        if (videoRef.current) videoRef.current.srcObject = null;
     };
 
-    const capturePhoto = () => {
-        if (videoRef.current && canvasRef.current) {
-            const video = videoRef.current;
-            const canvas = canvasRef.current;
+    const capturePhoto = async () => {
+        if (!videoRef.current || !canvasRef.current || !isModelLoaded) return;
 
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+        setIsScanning(true);
+        const video = videoRef.current;
 
-            const context = canvas.getContext('2d');
-            if (context) {
-                // Mirror effect
-                context.translate(canvas.width, 0);
-                context.scale(-1, 1);
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // 2. AI Check: Detect Faces
+        // Using TinyFaceDetector options for speed
+        const detections = await faceapi.detectAllFaces(
+            video,
+            new faceapi.TinyFaceDetectorOptions()
+        );
 
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                setCapturedImage(dataUrl);
-                onCapture(dataUrl);
+        setIsScanning(false);
 
-                // FIX: Stop camera immediately after capture
-                stopCamera();
-            }
+        if (detections.length === 0) {
+            alert("No face detected! Please position your face clearly in the frame.");
+            return;
+        }
+
+        if (detections.length > 1) {
+            alert("Multiple faces detected! Only you should be in the frame.");
+            return;
+        }
+
+        // 3. If passed, Capture
+        const canvas = canvasRef.current;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        const context = canvas.getContext('2d');
+        if (context) {
+            context.translate(canvas.width, 0);
+            context.scale(-1, 1);
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            setCapturedImage(dataUrl);
+            onCapture(dataUrl);
+            stopCamera();
         }
     };
 
     const handleRetake = () => {
         setCapturedImage(null);
-        startCamera(); // Restart camera
+        startCamera();
         if (onRetake) onRetake();
     };
 
     if (error) {
         return (
             <div className="bg-red-50 text-red-600 p-4 rounded-lg text-center border border-red-200">
-                <i className="fa-solid fa-camera-slash text-2xl mb-2"></i>
+                <i className="fa-solid fa-triangle-exclamation text-2xl mb-2"></i>
                 <p className="text-sm font-bold">{error}</p>
-                <button
-                    onClick={() => startCamera()}
-                    className="mt-2 text-xs bg-red-100 hover:bg-red-200 px-3 py-1 rounded-full transition-colors"
-                >
-                    Try Again
-                </button>
             </div>
         );
     }
@@ -105,13 +124,31 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
         <div className="flex flex-col items-center space-y-4">
             <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden shadow-inner border border-slate-200">
                 {!capturedImage ? (
-                    <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline // Critical for mobile
-                        muted
-                        className="w-full h-full object-cover transform -scale-x-100"
-                    />
+                    <>
+                        <video
+                            ref={videoRef}
+                            autoPlay
+                            playsInline
+                            muted
+                            className="w-full h-full object-cover transform -scale-x-100"
+                        />
+                        {/* Overlay Status */}
+                        <div className="absolute top-2 right-2 bg-black/60 px-2 py-1 rounded-md flex items-center gap-2 backdrop-blur-sm">
+                            <div className={`w-2 h-2 rounded-full ${isModelLoaded ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
+                            <span className="text-[10px] text-white font-mono uppercase">
+                                {isModelLoaded ? 'AI Ready' : 'Loading AI...'}
+                            </span>
+                        </div>
+                        {/* Scanning Overlay */}
+                        {isScanning && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+                                <div className="text-white text-center">
+                                    <i className="fa-solid fa-expand fa-spin text-3xl mb-2"></i>
+                                    <p className="text-sm font-bold">Scanning Face...</p>
+                                </div>
+                            </div>
+                        )}
+                    </>
                 ) : (
                     <img src={capturedImage} alt="Selfie" className="w-full h-full object-cover" />
                 )}
@@ -122,9 +159,10 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
                 {!capturedImage ? (
                     <button
                         onClick={capturePhoto}
-                        className="w-14 h-14 rounded-full border-4 border-blue-500 flex items-center justify-center bg-white shadow-lg hover:scale-105 transition-transform"
+                        disabled={!isModelLoaded || isScanning}
+                        className={`w-14 h-14 rounded-full border-4 flex items-center justify-center shadow-lg transition-transform ${!isModelLoaded ? 'border-slate-300 bg-slate-100 opacity-50 cursor-not-allowed' : 'border-blue-500 bg-white hover:scale-105 cursor-pointer'}`}
                     >
-                        <div className="w-10 h-10 bg-blue-500 rounded-full"></div>
+                        <div className={`w-10 h-10 rounded-full ${!isModelLoaded ? 'bg-slate-300' : 'bg-blue-500'}`}></div>
                     </button>
                 ) : (
                     <button
@@ -135,6 +173,10 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
                     </button>
                 )}
             </div>
+
+            {!isModelLoaded && !capturedImage && (
+                <p className="text-xs text-slate-400 animate-pulse">Initializing Face Detection Models...</p>
+            )}
         </div>
     );
 };

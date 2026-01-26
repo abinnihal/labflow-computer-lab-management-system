@@ -19,9 +19,12 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
     useEffect(() => {
         const loadModels = async () => {
             try {
-                // Load the Tiny Face Detector (lightweight & fast)
-                // Ensure you have these files in public/models
-                await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+                // Load BOTH the Detector and the Expression models
+                // Ensure you have 'face_expression_model-shard1' etc. in public/models
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+                    faceapi.nets.faceExpressionNet.loadFromUri('/models')
+                ]);
                 setIsModelLoaded(true);
             } catch (err) {
                 console.error("AI Model Load Failed:", err);
@@ -39,7 +42,7 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
             const constraints = {
                 video: {
                     facingMode: "user",
-                    width: { ideal: 640 }, // Lower res is faster for AI
+                    width: { ideal: 640 },
                     height: { ideal: 480 }
                 }
             };
@@ -68,26 +71,36 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
         setIsScanning(true);
         const video = videoRef.current;
 
-        // 2. AI Check: Detect Faces
-        // Using TinyFaceDetector options for speed
+        // 2. AI Check: Detect Faces AND Expressions
+        // We chain .withFaceExpressions() to get emotion data
         const detections = await faceapi.detectAllFaces(
             video,
             new faceapi.TinyFaceDetectorOptions()
-        );
+        ).withFaceExpressions();
 
         setIsScanning(false);
 
+        // Check 1: Is there a face?
         if (detections.length === 0) {
             alert("No face detected! Please position your face clearly in the frame.");
             return;
         }
 
+        // Check 2: Are there multiple people?
         if (detections.length > 1) {
             alert("Multiple faces detected! Only you should be in the frame.");
             return;
         }
 
-        // 3. If passed, Capture
+        // Check 3: LIVENESS CHECK (The Smile Test)
+        // 'happy' returns a confidence score from 0.0 to 1.0
+        const emotions = detections[0].expressions;
+        if (emotions.happy < 0.7) {
+            alert("Please SMILE to verify you are a real person!");
+            return;
+        }
+
+        // 4. If passed, Capture
         const canvas = canvasRef.current;
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -132,6 +145,7 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
                             muted
                             className="w-full h-full object-cover transform -scale-x-100"
                         />
+
                         {/* Overlay Status */}
                         <div className="absolute top-2 right-2 bg-black/60 px-2 py-1 rounded-md flex items-center gap-2 backdrop-blur-sm">
                             <div className={`w-2 h-2 rounded-full ${isModelLoaded ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
@@ -139,12 +153,20 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
                                 {isModelLoaded ? 'AI Ready' : 'Loading AI...'}
                             </span>
                         </div>
+
+                        {/* Instruction Badge */}
+                        <div className="absolute bottom-4 left-0 right-0 text-center">
+                            <span className="bg-black/60 text-white px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md animate-bounce shadow-lg border border-white/20">
+                                Please Smile & Capture
+                            </span>
+                        </div>
+
                         {/* Scanning Overlay */}
                         {isScanning && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
                                 <div className="text-white text-center">
-                                    <i className="fa-solid fa-expand fa-spin text-3xl mb-2"></i>
-                                    <p className="text-sm font-bold">Scanning Face...</p>
+                                    <i className="fa-solid fa-face-smile fa-spin text-3xl mb-2"></i>
+                                    <p className="text-sm font-bold">Verifying Expression...</p>
                                 </div>
                             </div>
                         )}
@@ -175,7 +197,7 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
             </div>
 
             {!isModelLoaded && !capturedImage && (
-                <p className="text-xs text-slate-400 animate-pulse">Initializing Face Detection Models...</p>
+                <p className="text-xs text-slate-400 animate-pulse">Initializing Face & Emotion Models...</p>
             )}
         </div>
     );

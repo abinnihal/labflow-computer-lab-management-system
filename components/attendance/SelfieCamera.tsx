@@ -9,7 +9,11 @@ interface Props {
 const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    // FIX: Use a Ref to store the stream for cleanup, as state might be stale in useEffect closure
+    const streamRef = useRef<MediaStream | null>(null);
     const [stream, setStream] = useState<MediaStream | null>(null);
+
     const [capturedImage, setCapturedImage] = useState<string | null>(null);
     const [error, setError] = useState<string>('');
     const [isModelLoaded, setIsModelLoaded] = useState(false);
@@ -17,28 +21,35 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
 
     // 1. Load AI Models on Mount
     useEffect(() => {
+        let isMounted = true;
+
         const loadModels = async () => {
             try {
-                // Load BOTH the Detector and the Expression models
-                // Ensure you have 'face_expression_model-shard1' etc. in public/models
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
                     faceapi.nets.faceExpressionNet.loadFromUri('/models')
                 ]);
-                setIsModelLoaded(true);
+                if (isMounted) setIsModelLoaded(true);
             } catch (err) {
                 console.error("AI Model Load Failed:", err);
-                setError("Failed to load AI face detection. Please refresh.");
+                if (isMounted) setError("Failed to load AI face detection. Please refresh.");
             }
         };
         loadModels();
-
         startCamera();
-        return () => stopCamera();
+
+        // CLEANUP: This now works because it uses streamRef
+        return () => {
+            isMounted = false;
+            stopCamera();
+        };
     }, []);
 
     const startCamera = async () => {
         try {
+            // Stop any existing stream first
+            stopCamera();
+
             const constraints = {
                 video: {
                     facingMode: "user",
@@ -47,7 +58,11 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
                 }
             };
             const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+            // Save to Ref (for cleanup) AND State (for UI)
+            streamRef.current = mediaStream;
             setStream(mediaStream);
+
             if (videoRef.current) {
                 videoRef.current.srcObject = mediaStream;
             }
@@ -58,11 +73,15 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
     };
 
     const stopCamera = () => {
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
+        // FIX: Check the Ref, not the State
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
             setStream(null);
         }
-        if (videoRef.current) videoRef.current.srcObject = null;
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
     };
 
     const capturePhoto = async () => {
@@ -72,49 +91,53 @@ const SelfieCamera: React.FC<Props> = ({ onCapture, onRetake }) => {
         const video = videoRef.current;
 
         // 2. AI Check: Detect Faces AND Expressions
-        // We chain .withFaceExpressions() to get emotion data
-        const detections = await faceapi.detectAllFaces(
-            video,
-            new faceapi.TinyFaceDetectorOptions()
-        ).withFaceExpressions();
+        try {
+            const detections = await faceapi.detectAllFaces(
+                video,
+                new faceapi.TinyFaceDetectorOptions()
+            ).withFaceExpressions();
 
-        setIsScanning(false);
+            setIsScanning(false);
 
-        // Check 1: Is there a face?
-        if (detections.length === 0) {
-            alert("No face detected! Please position your face clearly in the frame.");
-            return;
-        }
+            // Check 1: Is there a face?
+            if (detections.length === 0) {
+                alert("No face detected! Please position your face clearly in the frame.");
+                return;
+            }
 
-        // Check 2: Are there multiple people?
-        if (detections.length > 1) {
-            alert("Multiple faces detected! Only you should be in the frame.");
-            return;
-        }
+            // Check 2: Are there multiple people?
+            if (detections.length > 1) {
+                alert("Multiple faces detected! Only you should be in the frame.");
+                return;
+            }
 
-        // Check 3: LIVENESS CHECK (The Smile Test)
-        // 'happy' returns a confidence score from 0.0 to 1.0
-        const emotions = detections[0].expressions;
-        if (emotions.happy < 0.7) {
-            alert("Please SMILE to verify you are a real person!");
-            return;
-        }
+            // Check 3: LIVENESS CHECK (The Smile Test)
+            const emotions = detections[0].expressions;
+            if (emotions.happy < 0.7) {
+                alert("Please SMILE to verify you are a real person!");
+                return;
+            }
 
-        // 4. If passed, Capture
-        const canvas = canvasRef.current;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+            // 4. If passed, Capture
+            const canvas = canvasRef.current;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
 
-        const context = canvas.getContext('2d');
-        if (context) {
-            context.translate(canvas.width, 0);
-            context.scale(-1, 1);
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const context = canvas.getContext('2d');
+            if (context) {
+                context.translate(canvas.width, 0);
+                context.scale(-1, 1);
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            setCapturedImage(dataUrl);
-            onCapture(dataUrl);
-            stopCamera();
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                setCapturedImage(dataUrl);
+                onCapture(dataUrl);
+                stopCamera(); // Stop stream immediately after capture
+            }
+        } catch (e) {
+            console.error(e);
+            setIsScanning(false);
+            alert("Face detection error. Try again.");
         }
     };
 

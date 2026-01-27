@@ -1,13 +1,18 @@
-
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { User, UserRole } from './types';
+
+// --- Auth Components ---
 import Login from './components/auth/Login';
 import SignUpContainer from './components/auth/SignUpContainer';
 import NewLandingPage from './components/new-landing/NewLandingPage';
+
+// --- Dashboards ---
 import StudentDashboard from './components/dashboards/StudentDashboard';
 import FacultyDashboard from './components/dashboards/FacultyDashboard';
 import AdminDashboard from './components/dashboards/AdminDashboard';
+
+// --- Common Components ---
 import CalendarView from './components/CalendarView';
 import AIChatPage from './components/AIChatPage';
 import AttendancePage from './components/AttendancePage';
@@ -20,6 +25,12 @@ import FacultyProfile from './components/profile/FacultyProfile';
 import ManageBookingsPage from './components/bookings/ManageBookingsPage';
 import StudentFeedbackPage from './components/feedback/StudentFeedbackPage';
 import FacultyFeedbackPage from './components/feedback/FacultyFeedbackPage';
+
+// --- Resource Module ---
+import FacultyResourcesPage from './components/resources/FacultyResourcesPage';
+import StudentResourcesPage from './components/resources/StudentResourcesPage';
+
+// --- Admin Components ---
 import UserManagementPage from './components/admin/UserManagementPage';
 import LabsManagementPage from './components/admin/LabsManagementPage';
 import ConsoleModerationPage from './components/admin/ConsoleModerationPage';
@@ -27,6 +38,8 @@ import AdminFeedbackPage from './components/admin/AdminFeedbackPage';
 import AnalyticsPage from './components/admin/AnalyticsPage';
 import NotificationManagerPage from './components/admin/NotificationManagerPage';
 import StudentManagementPage from './components/students/StudentManagementPage';
+
+// --- UI Components ---
 import AIChatWindow from './components/AIChatWindow';
 import ThemeToggle from './components/ui/ThemeToggle';
 import Logo from './components/ui/Logo';
@@ -90,12 +103,14 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
           {user.role === UserRole.FACULTY && (
             <>
               <div className="px-4 py-2 mt-4 mb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Academic</div>
+              {/* UPDATED ORDER: Calendar, Booking, Progress, Task, Resource, Feedback, Student, Profile */}
               <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Calendar & Schedule" onClick={() => setSidebarOpen(false)} />
+              <SidebarLink to="/dashboard/bookings" icon="fa-computer" label="Manage Bookings" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/progress" icon="fa-bars-progress" label="Check In Progress" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Tasks & Assignment" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/bookings" icon="fa-computer" label="Manage Bookings" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/students" icon="fa-users-gear" label="Student Management" onClick={() => setSidebarOpen(false)} />
+              <SidebarLink to="/dashboard/resources" icon="fa-book-open" label="Resource Hub" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/feedback" icon="fa-comments" label="Feedback & Issue" onClick={() => setSidebarOpen(false)} />
+              <SidebarLink to="/dashboard/students" icon="fa-users-gear" label="Student Management" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/profile" icon="fa-user-tie" label="Profile" onClick={() => setSidebarOpen(false)} />
             </>
           )}
@@ -103,9 +118,10 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
           {user.role === UserRole.STUDENT && (
             <>
               <div className="px-4 py-2 mt-4 mb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Learning</div>
-              <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Assignments" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/attendance" icon="fa-clock" label="Attendance" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Schedule" onClick={() => setSidebarOpen(false)} />
+              <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Assignments" onClick={() => setSidebarOpen(false)} />
+              <SidebarLink to="/dashboard/resources" icon="fa-book-open" label="Resource Hub" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/community" icon="fa-users" label="Community" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/ai-chat" icon="fa-robot" label="Lab Assistant" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/support" icon="fa-headset" label="Support" onClick={() => setSidebarOpen(false)} />
@@ -182,6 +198,9 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
               <Route path="calendar" element={<CalendarView user={user} />} />
               <Route path="bookings" element={<ManageBookingsPage user={user} />} />
               <Route path="community" element={<LearnersConsole user={user} />} />
+
+              {/* Resource Module Route */}
+              <Route path="resources" element={user.role === UserRole.STUDENT ? <StudentResourcesPage user={user} /> : <FacultyResourcesPage user={user} />} />
 
               {/* Student Routes */}
               <Route path="tasks" element={user.role === UserRole.STUDENT ? <StudentTasksPage user={user} /> : <FacultyTasksPage user={user} />} />

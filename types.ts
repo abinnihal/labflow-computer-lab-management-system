@@ -258,3 +258,26 @@ export interface ConflictResult {
   message?: string;
   conflictingBooking?: Booking;
 }
+
+export interface Material {
+  id: string;
+  title: string;
+  description: string;
+  fileUrl: string;
+  fileType: string; // 'PDF', 'PPT', 'ZIP', 'IMG'
+
+  // Metadata
+  subject: string;
+  semester: string;    // e.g., "S5"
+  batch: string[];     // ["Batch A", "Batch B"] or ["ALL"]
+  tags: string[];      // ["React", "Hooks"]
+
+  // Smart Linking
+  relatedTaskId?: string; // Optional: Link to a specific assignment ID
+
+  // Analytics
+  downloadCount: number;
+  uploadedBy: string;     // Faculty ID
+  uploadedByName: string;
+  createdAt: string;
+}

@@ -119,6 +119,8 @@ export interface Task {
   createdAt: string;
   attachmentUrl?: string; // (Faculty uploads this)
   duration?: string;      // (Exam duration in minutes)
+  subjectId: string;
+  subjectName: string; // For display (e.g., "Java Lab")
 }
 
 export interface Submission {
@@ -186,6 +188,7 @@ export interface AttendanceLog {
   systemNumber?: number;
   date?: string;
   proofUrl?: string;
+  subjectId: string;
 }
 
 export interface Notification {
@@ -280,4 +283,14 @@ export interface Material {
   uploadedBy: string;     // Faculty ID
   uploadedByName: string;
   createdAt: string;
+}
+
+export interface Subject {
+  id: string;
+  name: string;        // e.g., "Advanced Java Lab"
+  code: string;        // e.g., "BCA-502"
+  batchId: string;     // e.g., "BCA-S5-2026" (Who studies this?)
+  facultyId: string;   // e.g., "fac123" (Who teaches this?)
+  facultyName: string; // Cached for display
+  semester: string;    // e.g., "S5"
 }

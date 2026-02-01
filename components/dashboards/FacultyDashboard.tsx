@@ -1,37 +1,24 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { User, UserRole, Lab } from '../../types';
+import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 import { getUpcomingEvents, GCalEvent } from '../../services/googleCalendarService';
 import { getAttendanceLogs, AttendanceRecord, getActivitiesForFaculty, StudentActivity, manualCheckIn } from '../../services/attendanceService';
-import { getPendingSubmissionsCount } from '../../services/taskService';
+import { getPendingSubmissionsCount, getTasksByFaculty } from '../../services/taskService';
 import { getPendingMaintenanceCount } from '../../services/maintenanceService';
 import { getAllLabs } from '../../services/labService';
 import BookingModal from '../bookings/BookingModal';
 import ApprovalList from '../approvals/ApprovalList';
 import { getPendingUsersByRole } from '../../services/userService';
 import { MOCK_ROSTER } from '../../constants';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 interface Props {
   user: User;
 }
 
-// Course Mapping based on Department & Level
-const COURSES_BY_LEVEL: Record<string, Record<string, string[]>> = {
-  'Computer Science': {
-    UG: ['BCA', 'B.Sc CS', 'B.Tech CSE'],
-    PG: ['MCA', 'M.Sc CS', 'M.Tech CSE']
-  },
-  'Information Technology': {
-    UG: ['B.Tech IT', 'B.Sc IT'],
-    PG: ['M.Tech IT', 'M.Sc IT']
-  },
-  'default': {
-    UG: ['BCA', 'B.Sc'],
-    PG: ['MCA', 'M.Sc']
-  }
-};
-
-// Helper Interface for Grouping
+// Helper Interface for Grouping Sessions
 interface LabSession {
   id: string;
   labName: string;
@@ -41,100 +28,96 @@ interface LabSession {
 }
 
 const FacultyDashboard: React.FC<Props> = ({ user }) => {
+  // 1. GET CONTEXT FROM LOCAL STORAGE
+  const contextType = localStorage.getItem('activeContext') as 'SUBJECT' | 'ADVISOR' | null;
+  const subjectId = localStorage.getItem('activeSubjectId');
+  const subjectName = localStorage.getItem('activeSubjectName') || 'General';
+  const subjectSemester = localStorage.getItem('activeSemester') || 'All';
+
+  // State
   const [schedule, setSchedule] = useState<GCalEvent[]>([]);
   const [loadingSchedule, setLoadingSchedule] = useState(true);
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceRecord[]>([]);
   const [studentActivities, setStudentActivities] = useState<StudentActivity[]>([]);
 
-  // New State for Session View & Proofs
+  // Default Tab Logic
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'APPROVALS' | 'ACTIVITIES'>('OVERVIEW');
+
+  // New Features State
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [proofModalUrl, setProofModalUrl] = useState<string | null>(null);
-
-  // Real-time Stats
-  const [pendingGrading, setPendingGrading] = useState(0);
-  const [labIssues, setLabIssues] = useState(0);
   const [labs, setLabs] = useState<Lab[]>([]);
 
-  // Tabs & Modal State
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'APPROVALS' | 'ACTIVITIES'>('OVERVIEW');
+  // Modals & Stats
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-
-  // Manual Entry Form
   const [manualEntryData, setManualEntryData] = useState({ studentId: '', labId: '', status: 'PRESENT' as 'PRESENT' | 'LATE' });
 
-  // --- Class Selection State ---
-  const initialLevel = user.programType === 'PG' ? 'PG' : 'UG';
-  const [selectedLevel, setSelectedLevel] = useState<'UG' | 'PG'>(initialLevel);
-  const [selectedCourse, setSelectedCourse] = useState<string>('');
-  const [selectedSemester, setSelectedSemester] = useState<string>('');
+  const [stats, setStats] = useState({
+    pendingGrading: 0,
+    labIssues: 0,
+    liveAttendance: 0
+  });
 
-  // Derived Options
-  const availableCourses = useMemo(() => {
-    const deptCourses = COURSES_BY_LEVEL[user.department || 'default'] || COURSES_BY_LEVEL['default'];
-    if (user.programType === 'UG' && selectedLevel === 'PG') return [];
-    if (user.programType === 'PG' && selectedLevel === 'UG') return [];
-    return deptCourses[selectedLevel] || [];
-  }, [user.department, user.programType, selectedLevel]);
-
-  // Set default course when level changes
+  // Switch default tab when context changes
   useEffect(() => {
-    if (availableCourses.length > 0) {
-      setSelectedCourse(availableCourses[0]);
+    if (contextType === 'ADVISOR') {
+      setActiveTab('APPROVALS');
     } else {
-      setSelectedCourse('');
+      setActiveTab('OVERVIEW');
     }
-  }, [availableCourses]);
-
-  // Set default semester
-  useEffect(() => {
-    if (user.managedSemesters && user.managedSemesters.length > 0) {
-      setSelectedSemester(user.managedSemesters[0]);
-    }
-  }, [selectedCourse, user.managedSemesters]);
-
+  }, [contextType]);
 
   useEffect(() => {
     refreshData();
-  }, [activeTab, user.department, user.managedSemesters, user.id]);
+  }, [activeTab, user.id, subjectId]);
 
   const refreshData = async () => {
     try {
-      // 1. Load Calendar
+      if (!subjectId) return;
+
+      // 1. Load Calendar (Global for Faculty)
       const events = await getUpcomingEvents();
-      const today = new Date().toDateString();
-      const todaysEvents = events.filter(e => {
-        const eDate = e.start.dateTime ? new Date(e.start.dateTime) : null;
-        return eDate && eDate.toDateString() === today;
-      });
-      setSchedule(todaysEvents.length > 0 ? todaysEvents : events.slice(0, 3));
+      setSchedule(events.slice(0, 3));
       setLoadingSchedule(false);
 
-      // 2. Load Attendance & Labs
-      const logs = await getAttendanceLogs();
-      const safeLogs = Array.isArray(logs) ? logs : [];
-      setAttendanceLogs(safeLogs);
+      // --- SUBJECT MODE DATA ---
+      if (contextType === 'SUBJECT') {
+        // A. Attendance (Filtered by Subject)
+        const logs = await getAttendanceLogs();
+        const subjectLogs = logs.filter(l => l.subjectId === subjectId);
+        setAttendanceLogs(subjectLogs);
 
-      const labsData = await getAllLabs();
-      setLabs(labsData || []);
+        const labsData = await getAllLabs();
+        setLabs(labsData || []);
 
-      // 3. Load Student Activities
-      if (user.department && user.managedSemesters) {
-        const acts = await getActivitiesForFaculty(user.department, user.managedSemesters);
-        setStudentActivities(acts || []);
+        // B. Activities (Filtered by Semester)
+        if (user.department && user.managedSemesters) {
+          const acts = await getActivitiesForFaculty(user.department, user.managedSemesters);
+          setStudentActivities(acts || []);
+        }
+
+        // C. Stats
+        const allTasks = await getTasksByFaculty(user.id);
+        const subjectTasks = allTasks.filter(t => t.subjectId === subjectId);
+        const gradingCount = subjectTasks.filter(t => t.type === 'ASSIGNMENT' && t.status === 'OPEN').length;
+        const issuesCount = await getPendingMaintenanceCount(user.id);
+
+        setStats({
+          pendingGrading: gradingCount,
+          labIssues: issuesCount,
+          liveAttendance: subjectLogs.filter(l => l.status === 'PRESENT').length
+        });
       }
-
-      // 4. Check pending students
-      const pendingStudents = await getPendingUsersByRole(UserRole.STUDENT, user.department, user.managedSemesters);
-      setPendingCount(pendingStudents.length);
-
-      // 5. Load Task & Issue Stats
-      const gradingCount = await getPendingSubmissionsCount(user.id);
-      setPendingGrading(gradingCount);
-
-      const issuesCount = await getPendingMaintenanceCount(user.id);
-      setLabIssues(issuesCount);
+      // --- ADVISOR MODE DATA ---
+      else if (contextType === 'ADVISOR') {
+        // A. Pending Approvals (Filtered by Semester)
+        const allPending = await getPendingUsersByRole(UserRole.STUDENT, user.department);
+        // Only show students who match the advisor's semester
+        const myPending = allPending.filter(s => s.semester === subjectSemester);
+        setPendingCount(myPending.length);
+      }
 
     } catch (error) {
       console.error("Dashboard Refresh Error:", error);
@@ -150,34 +133,27 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
     }
   };
 
-  // --- NEW: Group Logs into Sessions ---
+  // --- SESSION GROUPING LOGIC ---
   const sessions = useMemo(() => {
     const groups: Record<string, LabSession> = {};
-
     attendanceLogs.forEach(log => {
-      // Key: Date + Lab Name ensures unique sessions per day per lab
       const dateKey = new Date(log.checkInTime).toLocaleDateString();
       const key = `${dateKey}-${log.labId}`;
-
       if (!groups[key]) {
         groups[key] = {
           id: key,
-          labName: log.labId || 'General Lab', // You can map ID to Name using 'labs' state if needed
+          labName: log.labId || 'General Lab',
           date: dateKey,
           totalStudents: 0,
           logs: []
         };
       }
-
       groups[key].logs.push(log);
       groups[key].totalStudents++;
     });
-
-    // Sort: Newest Date first
     return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [attendanceLogs]);
 
-  // Auto-select the first session on load
   useEffect(() => {
     if (sessions.length > 0 && !selectedSessionId) {
       setSelectedSessionId(sessions[0].id);
@@ -186,11 +162,10 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
 
   const currentSession = sessions.find(s => s.id === selectedSessionId);
 
-  // Dynamic Graph Data from logs
+  // --- GRAPH DATA ---
   const graphData = useMemo(() => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const dataMap = days.map(day => ({ name: day, present: 0, absent: 0 }));
-
     if (Array.isArray(attendanceLogs)) {
       attendanceLogs.forEach(log => {
         const d = new Date(log.checkInTime).getDay();
@@ -210,73 +185,62 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Faculty Dashboard</h1>
-          <p className="text-slate-500 dark:text-slate-400">Overview of your labs and student performance.</p>
-        </div>
-
-        <div className="flex gap-4 items-center">
-          <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-            <button
-              onClick={() => setActiveTab('OVERVIEW')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'OVERVIEW' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-            >
-              Overview
-            </button>
-            <button
-              onClick={() => setActiveTab('ACTIVITIES')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ACTIVITIES' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-            >
-              Activities
-            </button>
-            <button
-              onClick={() => setActiveTab('APPROVALS')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'APPROVALS' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-            >
-              Approvals
-              {pendingCount > 0 && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'APPROVALS' ? 'bg-white text-blue-600' : 'bg-red-50 text-white'}`}>
-                  {pendingCount}
-                </span>
-              )}
-            </button>
+      {/* Dynamic Banner */}
+      <div className={`rounded-2xl p-8 text-white shadow-lg relative overflow-hidden ${contextType === 'ADVISOR' ? 'bg-gradient-to-r from-purple-600 to-indigo-600' : 'bg-gradient-to-r from-blue-600 to-cyan-600'}`}>
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-2 opacity-80 text-sm font-bold uppercase tracking-wider">
+              <span className="bg-white/20 px-2 py-1 rounded">{subjectSemester}</span>
+              <span>{contextType === 'ADVISOR' ? 'Advisory Dashboard' : 'Classroom Dashboard'}</span>
+            </div>
+            <h1 className="text-3xl font-bold mb-1">{subjectName}</h1>
+            <p className="opacity-90">
+              {contextType === 'ADVISOR' ? 'Manage registrations and batch settings.' : 'Manage assignments, attendance, and grading.'}
+            </p>
           </div>
 
           <div className="flex gap-2">
-            <button
-              onClick={() => setIsManualEntryOpen(true)}
-              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 px-4 py-2.5 rounded-lg font-medium shadow-sm flex items-center gap-2"
-            >
-              <i className="fa-solid fa-user-check"></i> Manual Entry
-            </button>
-            <button
-              onClick={() => setIsBookingModalOpen(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium shadow-sm flex items-center gap-2"
-            >
-              <i className="fa-solid fa-plus"></i> Book Lab
-            </button>
+            <Link to="/select-subject" className="bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2">
+              <i className="fa-solid fa-arrow-right-arrow-left"></i> Switch Context
+            </Link>
+            {contextType === 'SUBJECT' && (
+              <button onClick={() => setIsManualEntryOpen(true)} className="bg-white text-blue-600 hover:bg-blue-50 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm flex items-center gap-2">
+                <i className="fa-solid fa-user-plus"></i> Manual Entry
+              </button>
+            )}
           </div>
         </div>
+        <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 transform skew-x-12"></div>
       </div>
 
-      {activeTab === 'APPROVALS' && (
-        <ApprovalList targetRole={UserRole.STUDENT} department={user.department} managedSemesters={user.managedSemesters} />
+      {/* Tabs */}
+      <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm w-fit">
+        {contextType === 'SUBJECT' ? (
+          <>
+            <button onClick={() => setActiveTab('OVERVIEW')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'OVERVIEW' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Overview</button>
+            <button onClick={() => setActiveTab('ACTIVITIES')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ACTIVITIES' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Activities</button>
+          </>
+        ) : (
+          <button onClick={() => setActiveTab('APPROVALS')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'APPROVALS' ? 'bg-purple-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+            Approvals {pendingCount > 0 && <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded-full">{pendingCount}</span>}
+          </button>
+        )}
+      </div>
+
+      {/* --- RENDER CONTENT BASED ON TABS --- */}
+
+      {activeTab === 'APPROVALS' && contextType === 'ADVISOR' && (
+        <ApprovalList currentUser={user} />
       )}
 
-      {activeTab === 'ACTIVITIES' && (
+      {activeTab === 'ACTIVITIES' && contextType === 'SUBJECT' && (
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-fade-in-up">
           <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
-            <h3 className="font-bold text-slate-800 dark:text-white">Student Activity Feed (Dept: {user.department})</h3>
-            <div className="text-xs text-slate-500 dark:text-slate-400 flex gap-2">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span> Present</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500"></span> Late</span>
-            </div>
+            <h3 className="font-bold text-slate-800 dark:text-white">Student Activity Feed</h3>
           </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-700">
             {studentActivities.length === 0 ? (
-              <div className="p-12 text-center text-slate-400 dark:text-slate-500 italic">No activity recorded.</div>
+              <div className="p-12 text-center text-slate-400 dark:text-slate-500 italic">No activity recorded for this class.</div>
             ) : (
               studentActivities.map(act => (
                 <div key={act.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
@@ -301,14 +265,15 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
         </div>
       )}
 
-      {activeTab === 'OVERVIEW' && (
+      {activeTab === 'OVERVIEW' && contextType === 'SUBJECT' && (
         <>
+          {/* Quick Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { label: 'Upcoming Classes', val: schedule.length.toString(), icon: 'fa-chalkboard-user', color: 'bg-blue-500' },
-              { label: 'Pending Grading', val: pendingGrading.toString(), icon: 'fa-file-signature', color: 'bg-orange-500' },
-              { label: 'Live Attendance', val: attendanceLogs.filter(l => l.status === 'PRESENT').length.toString(), icon: 'fa-users', color: 'bg-green-500' },
-              { label: 'Lab Issues', val: labIssues.toString(), icon: 'fa-triangle-exclamation', color: 'bg-red-500' },
+              { label: 'Pending Grading', val: stats.pendingGrading.toString(), icon: 'fa-file-signature', color: 'bg-orange-500' },
+              { label: 'Live Attendance', val: stats.liveAttendance.toString(), icon: 'fa-users', color: 'bg-green-500' },
+              { label: 'Lab Issues', val: stats.labIssues.toString(), icon: 'fa-triangle-exclamation', color: 'bg-red-500' },
             ].map((stat, idx) => (
               <div key={idx} className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-between transition-colors">
                 <div>
@@ -324,47 +289,31 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-            {/* Graph Section (Preserved) */}
+            {/* Attendance Graph & Sessions */}
             <div className="lg:col-span-2 space-y-6">
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-                  <h3 className="font-bold text-slate-800 dark:text-white">Class Attendance Overview</h3>
-                  {/* Selectors */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {user.programType === 'BOTH' && (
-                      <div className="bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5 flex">
-                        <button onClick={() => setSelectedLevel('UG')} className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedLevel === 'UG' ? 'bg-white dark:bg-slate-600 shadow text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'}`}>UG</button>
-                        <button onClick={() => setSelectedLevel('PG')} className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedLevel === 'PG' ? 'bg-white dark:bg-slate-600 shadow text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'}`}>PG</button>
-                      </div>
-                    )}
-                    <select value={selectedCourse} onChange={(e) => setSelectedCourse(e.target.value)} className="text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-slate-600 px-2 py-1 outline-none max-w-[120px]" disabled={availableCourses.length === 0}>
-                      {availableCourses.length > 0 ? availableCourses.map(c => <option key={c} value={c}>{c}</option>) : <option value="">No Courses</option>}
-                    </select>
-                    <select value={selectedSemester} onChange={(e) => setSelectedSemester(e.target.value)} className="text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-slate-600 px-2 py-1 outline-none" disabled={!user.managedSemesters || user.managedSemesters.length === 0}>
-                      {user.managedSemesters && user.managedSemesters.length > 0 ? user.managedSemesters.map(s => <option key={s} value={s}>{s} Sem</option>) : <option value="">No Semesters</option>}
-                    </select>
-                  </div>
-                </div>
 
+              {/* Graph */}
+              <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="font-bold text-slate-800 dark:text-white">Attendance Trends ({subjectName})</h3>
+                </div>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={graphData}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.2} />
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
-                      <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: '#fff', color: '#1e293b' }} />
-                      <Legend />
-                      <Bar dataKey="present" name="Present" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={20} />
-                      <Bar dataKey="absent" name="Absent" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
+                      <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', backgroundColor: '#fff', color: '#1e293b' }} />
+                      <Bar dataKey="present" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={20} />
+                      <Bar dataKey="absent" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
-              {/* NEW: Categorized Session View (Replaces old table) */}
+              {/* Sessions List & Detail View */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-
-                {/* LEFT: Session List */}
+                {/* Session Selector */}
                 <div className="md:col-span-1 border-r border-slate-200 dark:border-slate-700 overflow-y-auto max-h-[400px]">
                   <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
                     Past Sessions
@@ -388,7 +337,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
                   )}
                 </div>
 
-                {/* RIGHT: Detailed Table */}
+                {/* Session Detail Table */}
                 <div className="md:col-span-2 overflow-y-auto max-h-[400px]">
                   <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300 flex justify-between">
                     <span>{currentSession ? currentSession.labName : 'Select a Session'}</span>
@@ -436,7 +385,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
               </div>
             </div>
 
-            {/* Right Column: Schedule & Stats (Preserved) */}
+            {/* Right Column: Schedule & Lab Stats */}
             <div className="space-y-6">
               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
                 <div className="flex justify-between items-center mb-4">
@@ -469,7 +418,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
               </div>
 
               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-                <h3 className="font-bold text-slate-800 dark:text-white mb-4">Quick Stats</h3>
+                <h3 className="font-bold text-slate-800 dark:text-white mb-4">Lab Utilization</h3>
                 <div className="space-y-3">
                   {labs.slice(0, 3).map(lab => {
                     const active = getLabUtilization(lab.id);
@@ -494,12 +443,8 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
         </>
       )}
 
-      {isBookingModalOpen && (
-        <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} user={user} />
-      )}
-
-      {/* Manual Entry Modal (Preserved) */}
-      {isManualEntryOpen && (
+      {/* Manual Entry Modal - Only in Subject Mode */}
+      {contextType === 'SUBJECT' && isManualEntryOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in-up">
             <div className="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
@@ -531,7 +476,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
         </div>
       )}
 
-      {/* NEW: Proof Viewer Modal */}
+      {/* Proof Viewer Modal */}
       {proofModalUrl && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in" onClick={() => setProofModalUrl(null)}>
           <div className="relative max-w-lg w-full bg-white dark:bg-slate-800 p-2 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>

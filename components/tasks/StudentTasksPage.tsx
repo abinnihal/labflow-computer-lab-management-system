@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { User, Task } from '../../types';
+import { User, Task, Subject } from '../../types';
 import { getStudentTaskHistory, submitTask } from '../../services/taskService';
 import { uploadAssignment } from '../../services/storageService';
 import { useTabMonitor } from '../../hooks/useTabMonitor';
+import { getStudentSubjects } from '../../services/subjectService'; // <--- NEW IMPORT
 
 interface Props {
   user: User;
@@ -12,6 +13,10 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
   const [taskHistory, setTaskHistory] = useState<{ task: Task, status: string, grade?: string }[]>([]);
   const [activeTab, setActiveTab] = useState<'PENDING' | 'COMPLETED'>('PENDING');
   const [loading, setLoading] = useState(true);
+
+  // --- NEW: SUBJECT FILTERING STATE ---
+  const [enrolledSubjects, setEnrolledSubjects] = useState<Subject[]>([]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('ALL');
 
   // --- EXAM & SUBMISSION STATE ---
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -28,10 +33,31 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
 
   useEffect(() => {
     refreshTasks();
+    fetchStudentSubjects(); // <--- Fetch Subjects on Load
     return () => {
       localStorage.setItem('isExamActive', 'false');
     };
   }, [user.id]);
+
+  // --- NEW: FETCH SUBJECTS LOGIC ---
+  const fetchStudentSubjects = async () => {
+    try {
+      // If student profile has a semester (e.g., "S5"), fetch subjects for S5
+      if (!user.managedSemesters && !user.semester) return;
+
+      // Note: Depending on your User type definition, semester might be 'semester' or 'managedSemesters[0]'
+      // Assuming 'user.semester' exists for students based on previous context, 
+      // or we fallback to a hardcoded check if your user object varies.
+      const semester = user.semester || (user.managedSemesters ? user.managedSemesters[0] : '');
+
+      if (semester) {
+        const subs = await getStudentSubjects(semester);
+        setEnrolledSubjects(subs);
+      }
+    } catch (e) {
+      console.error("Subject fetch error:", e);
+    }
+  };
 
   const refreshTasks = async () => {
     setLoading(true);
@@ -40,7 +66,7 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
     setLoading(false);
   };
 
-  // --- TIMER LOGIC ---
+  // --- TIMER LOGIC (Unchanged) ---
   useEffect(() => {
     if (!isExamActive || timeLeft <= 0) return;
 
@@ -74,17 +100,10 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
   };
 
   const handleTimeUp = () => {
-    // 1. Stop the Exam (Locks inputs)
     setIsExamActive(false);
-    // 2. Enable Grace Period (Keeps Modal & Submit Button active)
     setGracePeriod(true);
-
-    // Unlock AI immediately when time is up (optional)
     localStorage.setItem('isExamActive', 'false');
-
     alert("🛑 Time is up! Inputs are now LOCKED.\nPlease click 'Submit' to save your work.");
-
-    // Auto-close if they don't submit within 2 mins
     setTimeout(() => {
       if (selectedTask) {
         alert("Session fully closed.");
@@ -153,9 +172,19 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  // --- NEW: FILTERING LOGIC ---
   const filteredTasks = taskHistory.filter(item => {
-    if (activeTab === 'PENDING') return item.status === 'PENDING' || item.status === 'OVERDUE';
-    return item.status === 'SUBMITTED' || item.status === 'APPROVED' || item.status === 'REJECTED';
+    // 1. Tab Filter
+    const matchesTab = activeTab === 'PENDING'
+      ? (item.status === 'PENDING' || item.status === 'OVERDUE')
+      : (item.status === 'SUBMITTED' || item.status === 'APPROVED' || item.status === 'REJECTED');
+
+    // 2. Subject Filter (The key addition)
+    const matchesSubject = selectedSubjectId === 'ALL'
+      ? true
+      : item.task.subjectId === selectedSubjectId;
+
+    return matchesTab && matchesSubject;
   });
 
   return (
@@ -166,9 +195,25 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
           <p className="text-slate-500 dark:text-slate-400">Track pending work and grades.</p>
         </div>
 
-        <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-          <button onClick={() => setActiveTab('PENDING')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'PENDING' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>To Do</button>
-          <button onClick={() => setActiveTab('COMPLETED')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'COMPLETED' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Completed</button>
+        <div className="flex gap-4">
+          {/* --- NEW: SUBJECT FILTER UI --- */}
+          {enrolledSubjects.length > 0 && (
+            <select
+              value={selectedSubjectId}
+              onChange={(e) => setSelectedSubjectId(e.target.value)}
+              className="px-3 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+            >
+              <option value="ALL">All Subjects</option>
+              {enrolledSubjects.map(sub => (
+                <option key={sub.id} value={sub.id}>{sub.name}</option>
+              ))}
+            </select>
+          )}
+
+          <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+            <button onClick={() => setActiveTab('PENDING')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'PENDING' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>To Do</button>
+            <button onClick={() => setActiveTab('COMPLETED')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'COMPLETED' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Completed</button>
+          </div>
         </div>
       </div>
 
@@ -177,21 +222,32 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredTasks.length === 0 ? (
-            <div className="col-span-full p-12 text-center text-slate-400 border border-dashed rounded-xl">No tasks found.</div>
+            <div className="col-span-full p-12 text-center text-slate-400 border border-dashed rounded-xl">
+              {selectedSubjectId !== 'ALL' ? `No ${activeTab.toLowerCase()} tasks for this subject.` : `No ${activeTab.toLowerCase()} tasks found.`}
+            </div>
           ) : (
             filteredTasks.map(({ task, status, grade }) => (
               <div key={task.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col hover:border-blue-400 transition-colors">
                 <div className="p-6 flex-1">
                   <div className="flex justify-between items-start mb-3">
-                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${task.type === 'LAB_EXAM' ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-blue-100 text-blue-700'}`}>
-                      {task.type === 'LAB_EXAM' ? 'LAB EXAM' : task.type.replace('_', ' ')}
-                    </span>
+                    <div className="flex gap-2">
+                      <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${task.type === 'LAB_EXAM' ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-blue-100 text-blue-700'}`}>
+                        {task.type === 'LAB_EXAM' ? 'LAB EXAM' : task.type.replace('_', ' ')}
+                      </span>
+
+                      {/* SUBJECT BADGE */}
+                      {task.subjectName && (
+                        <span className="px-2 py-1 rounded text-[10px] font-bold uppercase bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300">
+                          {task.subjectName}
+                        </span>
+                      )}
+                    </div>
                     {status === 'APPROVED' && <span className="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">{grade}</span>}
                   </div>
                   <h3 className="font-bold text-slate-800 dark:text-white mb-2">{task.title}</h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 line-clamp-3">{task.description}</p>
                 </div>
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/30 border-t border-slate-100">
+                <div className="p-4 bg-slate-50 dark:bg-slate-900/30 border-t border-slate-100 dark:border-slate-700">
                   {status === 'PENDING' || status === 'OVERDUE' ? (
                     <button onClick={() => handleStartExam(task)} className={`w-full font-bold py-2 rounded-lg text-white shadow-sm transition-colors ${task.type === 'LAB_EXAM' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                       {task.type === 'LAB_EXAM' ? 'Start Exam Mode' : 'Submit Work'}
@@ -206,17 +262,16 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
         </div>
       )}
 
-      {/* --- EXAM / SUBMISSION MODAL --- */}
+      {/* --- EXAM / SUBMISSION MODAL (Unchanged Logic, just styling consistency) --- */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-4xl p-6 flex flex-col h-[85vh] animate-fade-in-up ${isExamActive ? 'border-4 border-red-500' : ''}`}>
 
-            <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-200">
+            <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-200 dark:border-slate-700">
               <div>
                 <h3 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
                   {selectedTask.title}
                   {isExamActive && <span className="bg-red-600 text-white text-xs px-2 py-1 rounded animate-pulse">LIVE EXAM</span>}
-                  {/* SHOW "LOCKED" BADGE IF TIME IS UP */}
                   {gracePeriod && !isExamActive && <span className="bg-orange-600 text-white text-xs px-2 py-1 rounded"><i className="fa-solid fa-lock mr-1"></i>INPUTS LOCKED</span>}
                 </h3>
               </div>
@@ -230,7 +285,7 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
             </div>
 
             <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden">
-              <div className="md:w-1/3 overflow-y-auto pr-2 border-r border-slate-200">
+              <div className="md:w-1/3 overflow-y-auto pr-2 border-r border-slate-200 dark:border-slate-700">
                 <p className="text-sm text-slate-500 uppercase font-bold mb-2">Instructions</p>
                 <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{selectedTask.description}</p>
               </div>
@@ -239,11 +294,10 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
                 <textarea
                   value={submissionText}
                   onChange={(e) => setSubmissionText(e.target.value)}
-                  // LOCK LOGIC: Locked if Exam is inactive (unless it's a normal assignment)
                   disabled={selectedTask.type === 'LAB_EXAM' && !isExamActive}
                   className={`flex-1 w-full border rounded-lg p-4 text-sm font-mono focus:ring-2 outline-none resize-none ${selectedTask.type === 'LAB_EXAM' && !isExamActive
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
-                      : 'bg-slate-50 dark:bg-slate-900 border-slate-300 focus:ring-blue-500'
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
+                    : 'bg-slate-50 dark:bg-slate-900 border-slate-300 dark:border-slate-600 focus:ring-blue-500'
                     }`}
                   placeholder={isExamActive ? "// Time is running... Type code here..." : (selectedTask.type === 'LAB_EXAM' ? "// Time Up. Input Locked." : "// Paste solution...")}
                 ></textarea>
@@ -259,9 +313,8 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
                   </div>
                   <button
                     onClick={handleSubmit}
-                    // Button Enabled if Active OR Grace Period
                     disabled={isSubmitting || (selectedTask.type === 'LAB_EXAM' && !isExamActive && !gracePeriod)}
-                    className="px-8 py-3 rounded-lg font-bold text-white shadow-md flex items-center gap-2 bg-green-600 hover:bg-green-700"
+                    className="px-8 py-3 rounded-lg font-bold text-white shadow-md flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-50"
                   >
                     {isSubmitting ? <i className="fa-solid fa-circle-notch fa-spin"></i> : <i className="fa-solid fa-paper-plane"></i>}
                     Submit Now

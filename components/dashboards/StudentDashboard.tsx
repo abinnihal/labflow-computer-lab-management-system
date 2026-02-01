@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Booking, Task, AttendanceLog } from '../../types';
+import { User, Booking, Task, AttendanceLog, Subject } from '../../types';
 import {
   getStudentStatus,
   checkInStudent,
@@ -9,6 +9,7 @@ import {
 } from '../../services/attendanceService';
 import { getNextLabSession, getAllBookings } from '../../services/bookingService';
 import { getTasksForStudent } from '../../services/taskService';
+import { getStudentSubjects } from '../../services/subjectService'; // <--- NEW IMPORT
 import { Link } from 'react-router-dom';
 import CheckInModal from '../attendance/CheckInModal';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
@@ -75,9 +76,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
   const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [pendingTasks, setPendingTasks] = useState<Task[]>([]);
 
+  // --- NEW: SUBJECTS STATE ---
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+
   useEffect(() => {
     const fetchDashboardData = async () => {
-      // 1. Status Check (Now Async)
+      // 1. Status Check
       const status = await getStudentStatus(user.id);
       setIsCheckedIn(status.isCheckedIn);
       setCurrentRecord(status.currentRecord);
@@ -90,7 +94,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
           return new Date(b.endTime) < now && (b.userId === user.id);
         });
 
-        const logs = await getLogsByStudent(user.id); // Async
+        const logs = await getLogsByStudent(user.id);
         const completed = logs.filter(l => l.status === 'COMPLETED' || l.status === 'PRESENT').length;
         const totalSessions = Math.max(pastBookings.length, 1);
 
@@ -107,7 +111,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         console.error("Error fetching next session:", error);
       }
 
-      // 4. Pending Tasks (Async)
+      // 4. Pending Tasks
       try {
         const tasksData = await getTasksForStudent(user.id);
         const pending = tasksData
@@ -117,11 +121,22 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
       } catch (error) {
         console.error("Error fetching tasks:", error);
       }
+
+      // 5. --- NEW: FETCH SUBJECTS ---
+      try {
+        const semester = user.semester || (user.managedSemesters ? user.managedSemesters[0] : '');
+        if (semester) {
+          const subList = await getStudentSubjects(semester);
+          setSubjects(subList);
+        }
+      } catch (error) {
+        console.error("Error fetching subjects", error);
+      }
     };
 
     fetchDashboardData();
 
-  }, [user.id, refreshTrigger]);
+  }, [user.id, refreshTrigger, user.semester]);
 
   const handleToggleAttendance = async () => {
     if (isCheckedIn) {
@@ -150,7 +165,6 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
     setProcessing(true);
     setShowCheckInModal(false);
     try {
-      // Pass proofUrl to service
       const record = await checkInStudent(user, labId, systemNumber, proofUrl);
 
       await submitActivity(user, 'checkin', {
@@ -244,7 +258,47 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         )}
       </div>
 
-      {/* Main Grid */}
+      {/* --- NEW SECTION: MY SUBJECTS --- */}
+      <div>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+            <i className="fa-solid fa-book-open text-blue-500"></i> My Subjects
+          </h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {subjects.length === 0 ? (
+            <div className="col-span-full p-6 text-center border border-dashed border-slate-300 dark:border-slate-700 rounded-xl text-slate-400">
+              <i className="fa-solid fa-layer-group text-2xl mb-2 opacity-50"></i>
+              <p>No subjects assigned for {user.semester || 'your semester'}.</p>
+            </div>
+          ) : (
+            subjects.map(sub => (
+              <div key={sub.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all group">
+                <div className="flex justify-between items-start mb-3">
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-lg">
+                    {sub.name.charAt(0)}
+                  </div>
+                  <span className="text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-2 py-1 rounded font-mono">{sub.code}</span>
+                </div>
+                <h4 className="font-bold text-slate-800 dark:text-white mb-1 line-clamp-1">{sub.name}</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{user.semester}</p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Link to="/dashboard/resources" className="text-center text-[10px] bg-slate-50 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 py-2 rounded text-slate-600 dark:text-slate-300 font-bold transition-colors">
+                    Notes
+                  </Link>
+                  <Link to="/dashboard/tasks" className="text-center text-[10px] bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 py-2 rounded text-blue-600 dark:text-blue-400 font-bold transition-colors">
+                    Tasks
+                  </Link>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Main Grid: Stats, Calendar, Tasks */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto">
         {/* 1. Attendance Avg */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 flex flex-col items-center justify-center relative transition-colors">

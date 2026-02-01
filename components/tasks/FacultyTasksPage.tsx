@@ -17,9 +17,11 @@ interface Props {
 type TaskTab = 'ASSIGNMENT' | 'LAB_EXAM' | 'PROJECT';
 
 const FacultyTasksPage: React.FC<Props> = ({ user }) => {
-   const [tasks, setTasks] = useState<Task[]>([]);
+   // 1. GET ACTIVE CONTEXT
+   const subjectId = localStorage.getItem('activeSubjectId');
+   const subjectName = localStorage.getItem('activeSubjectName') || 'General';
 
-   // Tabs State
+   const [tasks, setTasks] = useState<Task[]>([]);
    const [activeTab, setActiveTab] = useState<TaskTab>('ASSIGNMENT');
    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
@@ -34,15 +36,22 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
    const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
    const [isSubmitting, setIsSubmitting] = useState(false);
 
-   useEffect(() => { refreshTasks(); }, [user.id]);
+   useEffect(() => {
+      refreshTasks();
+   }, [user.id, subjectId]);
 
    const refreshTasks = async () => {
+      if (!subjectId) return;
+
       setLoading(true);
-      const data = await getTasksByFaculty(user.id);
-      setTasks(data);
+      const allTasks = await getTasksByFaculty(user.id);
+
+      // 2. FILTER TASKS BY ACTIVE SUBJECT
+      const classTasks = allTasks.filter(t => t.subjectId === subjectId);
+      setTasks(classTasks);
 
       const newStats: Record<string, any> = {};
-      for (const task of data) {
+      for (const task of classTasks) {
          newStats[task.id] = await getTaskStats(task.id);
       }
       setStats(newStats);
@@ -50,7 +59,16 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
    };
 
    const handleCreateTask = async () => {
-      if (!newTask.title || !newTask.dueDate) return;
+      if (!newTask.title || !newTask.dueDate) {
+         alert("Please fill all required fields.");
+         return;
+      }
+
+      if (!subjectId) {
+         alert("Session Error: No Active Subject found. Please re-login.");
+         return;
+      }
+
       setIsSubmitting(true);
       try {
          let uploadedUrl = '';
@@ -58,14 +76,21 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
             const result = await uploadAssignment(attachmentFile);
             uploadedUrl = result.url;
          }
+
          await createTask({
             ...newTask as any,
             assignedById: user.id,
             assignedByName: user.name,
             status: 'OPEN',
-            courseId: 'BCA-V',
+            courseId: 'BCA-V', // Legacy field (can be ignored or dynamic based on sem)
+
+            // 3. AUTO-ASSIGN ACTIVE SUBJECT
+            subjectId: subjectId,
+            subjectName: subjectName,
+
             attachmentUrl: uploadedUrl
          });
+
          setIsCreateModalOpen(false);
          setNewTask({ title: '', description: '', dueDate: '', type: 'ASSIGNMENT', priority: 'MEDIUM', duration: '' });
          setAttachmentFile(null);
@@ -78,7 +103,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
 
    const openGrading = async (task: Task) => {
       setSelectedTaskForGrading(task);
-      setSubmissions([]); // Clear previous
+      setSubmissions([]);
       const subs = await getSubmissionsForTask(task.id);
       setSubmissions(subs);
    };
@@ -93,24 +118,25 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
       }
    };
 
-   // FILTER TASKS BASED ON ACTIVE TAB
    const filteredTasks = tasks.filter(t => t.type === activeTab);
+
+   if (!subjectId) {
+      return <div className="p-10 text-center text-slate-400">Please select a class from the dashboard to view tasks.</div>;
+   }
 
    return (
       <div className="space-y-6">
-         {/* --- HEADER AREA --- */}
+         {/* --- HEADER --- */}
          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-            {/* Title & Subtitle */}
             <div>
                <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Assignments & Exams</h1>
-               <p className="text-slate-500 dark:text-slate-400">Manage coursework and view submissions.</p>
+               <p className="text-slate-500 dark:text-slate-400">
+                  Managing: <span className="font-bold text-blue-600">{subjectName}</span>
+               </p>
             </div>
 
-            {/* --- RIGHT SIDE ACTIONS CONTAINER --- */}
-            {/* Contains Tabs AND Create Button on the same level */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
-
-               {/* TABS TOGGLE */}
+               {/* TABS */}
                <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm w-full sm:w-fit">
                   <button onClick={() => setActiveTab('ASSIGNMENT')} className={`flex-1 sm:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ASSIGNMENT' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Assignments</button>
                   <button onClick={() => setActiveTab('LAB_EXAM')} className={`flex-1 sm:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'LAB_EXAM' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Lab Exams</button>
@@ -130,15 +156,15 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                {loading ? <div className="text-center py-10 text-slate-400"><i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Loading...</div> :
                   filteredTasks.length === 0 ? (
                      <div className="p-8 text-center text-slate-400 bg-white dark:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
-                        No {activeTab.replace('_', ' ').toLowerCase()}s found.
+                        No {activeTab.replace('_', ' ').toLowerCase()}s for {subjectName}.
                      </div>
                   ) : (
                      filteredTasks.map(task => (
                         <div key={task.id} className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border transition-all cursor-pointer group ${selectedTaskForGrading?.id === task.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 dark:border-slate-700 hover:border-blue-400'}`} onClick={() => openGrading(task)}>
                            <div className="flex justify-between items-start mb-2">
                               <div>
-                                 <h3 className="font-bold text-slate-800 dark:text-white group-hover:text-blue-600 transition-colors">{task.title}</h3>
-                                 <p className="text-xs text-slate-500 dark:text-slate-400">Due: {new Date(task.dueDate).toLocaleDateString()}</p>
+                                 <h3 className="font-bold text-slate-800 dark:text-white group-hover:text-blue-600 transition-colors inline">{task.title}</h3>
+                                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Due: {new Date(task.dueDate).toLocaleDateString()}</p>
                               </div>
                               <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${task.type === 'LAB_EXAM' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}>{task.type.replace('_', ' ')}</span>
                            </div>
@@ -153,7 +179,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                   )}
             </div>
 
-            {/* Grading Panel */}
+            {/* Grading Panel (Preserved) */}
             <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 p-6 h-[600px] overflow-y-auto">
                {selectedTaskForGrading ? (
                   <>
@@ -204,24 +230,24 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
             </div>
          </div>
 
-         {/* CREATE MODAL (Kept your dark theme styling) */}
+         {/* CREATE MODAL */}
          {isCreateModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                <div className="bg-slate-800 rounded-xl shadow-2xl w-full max-w-lg p-6 animate-fade-in-up border border-slate-700">
-                  <h3 className="text-lg font-bold text-white mb-6">New Assignment</h3>
+                  <h3 className="text-lg font-bold text-white mb-6">New {activeTab === 'ASSIGNMENT' ? 'Assignment' : activeTab === 'LAB_EXAM' ? 'Lab Exam' : 'Project'}</h3>
                   <div className="space-y-4">
-                     <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Type</label>
-                        <select
-                           value={newTask.type}
-                           onChange={e => setNewTask({ ...newTask, type: e.target.value as any })}
-                           className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 transition-colors"
-                        >
-                           <option value="ASSIGNMENT">Assignment</option>
-                           <option value="LAB_EXAM">Lab Exam</option>
-                           <option value="PROJECT">Project</option>
-                        </select>
+
+                     {/* REMOVED SUBJECT SELECTOR - NOW AUTOMATIC */}
+                     <div className="p-3 bg-blue-900/20 border border-blue-900/30 rounded-lg flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
+                           {subjectName.charAt(0)}
+                        </div>
+                        <div>
+                           <p className="text-xs text-blue-400 uppercase font-bold">Assigning To</p>
+                           <p className="text-sm font-bold text-white">{subjectName}</p>
+                        </div>
                      </div>
+
                      <div>
                         <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Title</label>
                         <input
@@ -260,7 +286,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                         />
                      </div>
 
-                     {newTask.type === 'LAB_EXAM' && (
+                     {activeTab === 'LAB_EXAM' && (
                         <div className="p-3 bg-red-900/20 border border-red-900/30 rounded-lg">
                            <label className="block text-xs font-bold text-red-400 uppercase mb-1">Duration (Minutes)</label>
                            <input

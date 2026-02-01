@@ -1,8 +1,6 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { UserRole } from '../../types';
-import { registerUser } from '../../services/userService';
+import { registerFaculty } from '../../services/auth';
 import TerminalLoader from '../ui/TerminalLoader';
 import ThemeToggle from '../ui/ThemeToggle';
 import Logo from '../ui/Logo';
@@ -10,7 +8,7 @@ import Logo from '../ui/Logo';
 interface FacultySignUpProps {
   isDarkMode: boolean;
   toggleTheme: () => void;
-  embedded?: boolean; // New prop for embedded mode
+  embedded?: boolean;
 }
 
 const DEPARTMENTS = ['Computer Science', 'Information Technology', 'Data Science', 'Electronics'];
@@ -20,7 +18,7 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSuccess, setIsSuccess] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  
+
   // Password Visibility State
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -35,8 +33,12 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
     facultyId: '',
     department: 'Computer Science',
     programType: 'BOTH' as 'UG' | 'PG' | 'BOTH',
+    designation: 'Assistant Professor',
     managedSemesters: [] as string[],
   });
+
+  // NEW: State for Subject Mapping (Semester -> { Name, Code })
+  const [subjectDetails, setSubjectDetails] = useState<Record<string, { name: string, code: string }>>({});
 
   // Password Strength State
   const [pwdCriteria, setPwdCriteria] = useState({
@@ -47,8 +49,6 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
     special: false
   });
 
-  // Available semesters depend on program type usually, but faculty might manage various.
-  // For simplicity, showing all.
   const ALL_SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
 
   const validatePassword = (pwd: string) => {
@@ -65,11 +65,9 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
-    
-    // Real-time password validation
+
     if (name === 'password') validatePassword(value);
-    
-    // Clear error on change
+
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
     }
@@ -78,15 +76,40 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
   const handleSemesterToggle = (sem: string) => {
     setFormData(prev => {
       const current = prev.managedSemesters;
+      let newSemesters;
       if (current.includes(sem)) {
-        return { ...prev, managedSemesters: current.filter(s => s !== sem) };
+        // Remove semester and its subject details
+        newSemesters = current.filter(s => s !== sem);
+        setSubjectDetails(prevDetails => {
+          const newDetails = { ...prevDetails };
+          delete newDetails[sem];
+          return newDetails;
+        });
       } else {
-        return { ...prev, managedSemesters: [...current, sem] };
+        // Add semester and initialize subject details
+        newSemesters = [...current, sem];
+        setSubjectDetails(prevDetails => ({
+          ...prevDetails,
+          [sem]: { name: '', code: '' }
+        }));
       }
+      return { ...prev, managedSemesters: newSemesters };
     });
+
     if (errors.managedSemesters) {
-        setErrors(prev => ({ ...prev, managedSemesters: '' }));
+      setErrors(prev => ({ ...prev, managedSemesters: '' }));
     }
+  };
+
+  // NEW: Handle Subject Input Changes
+  const handleSubjectChange = (sem: string, field: 'name' | 'code', value: string) => {
+    setSubjectDetails(prev => ({
+      ...prev,
+      [sem]: {
+        ...prev[sem],
+        [field]: value
+      }
+    }));
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -115,15 +138,22 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
     if (!formData.fullName.trim()) newErrors.fullName = 'Full Name is required';
     if (!formData.phone.trim()) newErrors.phone = 'Phone is required';
     else if (!phoneRegex.test(formData.phone)) newErrors.phone = 'Invalid phone number';
-    
+
     if (!formData.email.trim()) newErrors.email = 'Email is required';
     else if (!emailRegex.test(formData.email)) newErrors.email = 'Invalid email format';
 
     if (!formData.facultyId.trim()) newErrors.facultyId = 'Faculty ID is required';
     if (!formData.department.trim()) newErrors.department = 'Department is required';
     if (!formData.programType) newErrors.programType = 'Program Level is required';
-    
-    if (formData.managedSemesters.length === 0) newErrors.managedSemesters = 'Select at least one semester to manage';
+
+    if (formData.managedSemesters.length === 0) newErrors.managedSemesters = 'Select at least one semester';
+
+    // Validate Subject Details
+    for (const sem of formData.managedSemesters) {
+      if (!subjectDetails[sem]?.name || !subjectDetails[sem]?.code) {
+        newErrors.subjects = `Enter Subject Name & Code for ${sem}`;
+      }
+    }
 
     if (!formData.password) newErrors.password = 'Password is required';
     else if (!Object.values(pwdCriteria).every(Boolean)) newErrors.password = 'Password does not meet criteria';
@@ -137,31 +167,37 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validateForm()) return;
 
     setIsLoading(true);
-    
-    setTimeout(() => {
-        try {
-            registerUser({
-                name: formData.fullName,
-                email: formData.email,
-                role: UserRole.FACULTY,
-                avatarUrl: `https://ui-avatars.com/api/?name=${formData.fullName}&background=random`,
-                facultyId: formData.facultyId,
-                department: formData.department,
-                programType: formData.programType,
-                managedSemesters: formData.managedSemesters
-            }, formData.password);
+    setErrors({});
 
-            setIsSuccess(true);
-        } catch (err) {
-            setErrors(prev => ({ ...prev, form: 'Registration failed. Please try again.' }));
-        } finally {
-            setIsLoading(false);
-        }
-    }, 2000);
+    try {
+      // Transform the map into the array format expected by the service
+      const formattedSubjects = formData.managedSemesters.map(sem => ({
+        name: subjectDetails[sem].name,
+        code: subjectDetails[sem].code,
+        semester: sem
+      }));
+
+      await registerFaculty(
+        formData.email,
+        formData.password,
+        formData.fullName,
+        formData.facultyId,
+        formData.designation,
+        formData.managedSemesters,
+        formattedSubjects // Passing the subject data
+      );
+
+      setIsSuccess(true);
+    } catch (err: any) {
+      console.error(err);
+      setErrors(prev => ({ ...prev, form: err.message || 'Registration failed. Please try again.' }));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Password Strength Calculations
@@ -173,53 +209,53 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
     <>
       {isLoading ? (
         <div className="flex flex-col items-center justify-center gap-6 animate-fade-in-up py-8">
-           <TerminalLoader />
-           <p className="text-slate-500 dark:text-slate-400 font-medium">Creating your account...</p>
+          <TerminalLoader />
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Creating your account & assigning subjects...</p>
         </div>
       ) : isSuccess ? (
         <div className="sm:mx-auto sm:w-full sm:max-w-md animate-fade-in-up">
-           <div className={`text-center ${embedded ? '' : 'bg-white dark:bg-slate-800 py-8 px-6 shadow-xl sm:rounded-2xl border border-slate-100 dark:border-slate-700'}`}>
-              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center text-3xl mx-auto mb-6">
-                 <i className="fa-solid fa-check"></i>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Registration Request Sent</h2>
-              <p className="text-slate-600 dark:text-slate-400 mb-6">
-                Your faculty account has been created and is currently <b>pending approval</b> from the Administrator. You will be notified via email once your account is active.
-              </p>
-              <Link 
-                to="/login"
-                className="block w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-colors shadow-md"
-              >
-                Back to Login
-              </Link>
-           </div>
+          <div className={`text-center ${embedded ? '' : 'bg-white dark:bg-slate-800 py-8 px-6 shadow-xl sm:rounded-2xl border border-slate-100 dark:border-slate-700'}`}>
+            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center text-3xl mx-auto mb-6">
+              <i className="fa-solid fa-check"></i>
+            </div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Registration Successful</h2>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
+              Your faculty account has been created with the assigned subjects. It is currently <b>pending approval</b> from the Administrator.
+            </p>
+            <Link
+              to="/login"
+              className="block w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-colors shadow-md"
+            >
+              Back to Login
+            </Link>
+          </div>
         </div>
       ) : (
         <>
           {errors.form && (
-              <div className="mb-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 p-3 rounded-lg text-sm border border-red-200 dark:border-red-800 flex items-center gap-2">
-                <i className="fa-solid fa-circle-exclamation"></i> {errors.form}
-              </div>
+            <div className="mb-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 p-3 rounded-lg text-sm border border-red-200 dark:border-red-800 flex items-center gap-2">
+              <i className="fa-solid fa-circle-exclamation"></i> {errors.form}
+            </div>
           )}
 
           <form className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Full Name</label>
-                  <input name="fullName" value={formData.fullName} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" />
-                  {errors.fullName && <p className="text-red-500 text-xs mt-1">{errors.fullName}</p>}
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Phone</label>
-                  <input name="phone" value={formData.phone} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" />
-                  {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Full Name</label>
+                <input name="fullName" value={formData.fullName} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" />
+                {errors.fullName && <p className="text-red-500 text-xs mt-1">{errors.fullName}</p>}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Phone</label>
+                <input name="phone" value={formData.phone} onChange={handleChange} type="text" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" />
+                {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
+              </div>
             </div>
 
             <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Email Address</label>
-                <input name="email" value={formData.email} onChange={handleChange} type="email" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" />
-                {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Email Address</label>
+              <input name="email" value={formData.email} onChange={handleChange} type="email" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500" />
+              {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -230,10 +266,10 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Department</label>
-                <select 
-                  name="department" 
-                  value={formData.department} 
-                  onChange={handleChange} 
+                <select
+                  name="department"
+                  value={formData.department}
+                  onChange={handleChange}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg"
                 >
                   {DEPARTMENTS.map(dept => (
@@ -244,59 +280,102 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
               </div>
             </div>
 
-            <div>
-               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Program Level</label>
-               <select name="programType" value={formData.programType} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Program Level</label>
+                <select name="programType" value={formData.programType} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg">
                   <option value="UG">Undergraduate (UG)</option>
                   <option value="PG">Postgraduate (PG)</option>
                   <option value="BOTH">Both (UG & PG)</option>
-               </select>
-               {errors.programType && <p className="text-red-500 text-xs mt-1">{errors.programType}</p>}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Designation</label>
+                <select name="designation" value={formData.designation} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg">
+                  <option value="Assistant Professor">Assistant Professor</option>
+                  <option value="Associate Professor">Associate Professor</option>
+                  <option value="Professor">Professor</option>
+                  <option value="Lab Instructor">Lab Instructor</option>
+                </select>
+              </div>
             </div>
 
             <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-2">Managed Semesters</label>
-                <div className="grid grid-cols-4 gap-2 bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-                    {ALL_SEMESTERS.map(sem => {
-                        const semStr = `${sem}${sem===1?'st':sem===2?'nd':sem===3?'rd':'th'}`;
-                        return (
-                            <label key={sem} className="flex items-center gap-2 cursor-pointer">
-                                <input 
-                                  type="checkbox" 
-                                  checked={formData.managedSemesters.includes(semStr)}
-                                  onChange={() => handleSemesterToggle(semStr)}
-                                  className="h-4 w-4 text-purple-600 rounded border-slate-300 dark:border-slate-600 focus:ring-purple-500"
-                                />
-                                <span className="text-sm text-slate-700 dark:text-slate-300">{semStr}</span>
-                            </label>
-                        );
-                    })}
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">Select the semesters you are responsible for approving.</p>
-                {errors.managedSemesters && <p className="text-red-500 text-xs mt-1">{errors.managedSemesters}</p>}
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-2">Teaching Semesters</label>
+              <div className="grid grid-cols-4 gap-2 bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                {ALL_SEMESTERS.map(sem => {
+                  const semStr = `S${sem}`;
+                  return (
+                    <label key={sem} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.managedSemesters.includes(semStr)}
+                        onChange={() => handleSemesterToggle(semStr)}
+                        className="h-4 w-4 text-purple-600 rounded border-slate-300 dark:border-slate-600 focus:ring-purple-500"
+                      />
+                      <span className="text-sm text-slate-700 dark:text-slate-300">{semStr}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {errors.managedSemesters && <p className="text-red-500 text-xs mt-1">{errors.managedSemesters}</p>}
             </div>
 
+            {/* DYNAMIC SUBJECT INPUTS */}
+            {formData.managedSemesters.length > 0 && (
+              <div className="bg-blue-50 dark:bg-slate-800/50 p-4 rounded-xl border border-blue-100 dark:border-slate-700 space-y-4 animate-fade-in">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase">Assign Subjects</h4>
+                  <span className="text-[10px] text-slate-400">Specify what you teach for each class</span>
+                </div>
+
+                {errors.subjects && (
+                  <div className="text-red-500 text-xs font-bold bg-red-50 dark:bg-red-900/20 p-2 rounded border border-red-100 dark:border-red-900/30">
+                    <i className="fa-solid fa-circle-exclamation mr-1"></i> {errors.subjects}
+                  </div>
+                )}
+
+                {formData.managedSemesters.sort().map(sem => (
+                  <div key={sem} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+                    <span className="w-10 text-sm font-bold text-slate-700 dark:text-slate-300 pt-2 sm:pt-0">{sem}:</span>
+                    <input
+                      placeholder="Subject Name (e.g. Java Lab)"
+                      className="flex-1 w-full px-3 py-2 text-xs border rounded-lg bg-white dark:bg-slate-900 dark:border-slate-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      value={subjectDetails[sem]?.name || ''}
+                      onChange={(e) => handleSubjectChange(sem, 'name', e.target.value)}
+                    />
+                    <input
+                      placeholder="Code (e.g. CS101)"
+                      className="w-full sm:w-28 px-3 py-2 text-xs border rounded-lg bg-white dark:bg-slate-900 dark:border-slate-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      value={subjectDetails[sem]?.code || ''}
+                      onChange={(e) => handleSubjectChange(sem, 'code', e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Password</label>
-                  <div className="relative">
-                    <input name="password" value={formData.password} onChange={handleChange} type={showPassword ? "text" : "password"} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg pr-10" placeholder="••••••••" />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 focus:outline-none">
-                      <i className={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
-                    </button>
-                  </div>
-                  {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Password</label>
+                <div className="relative">
+                  <input name="password" value={formData.password} onChange={handleChange} type={showPassword ? "text" : "password"} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg pr-10" placeholder="••••••••" />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 focus:outline-none">
+                    <i className={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Confirm</label>
-                  <div className="relative">
-                    <input name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} type={showConfirmPassword ? "text" : "password"} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg pr-10" placeholder="••••••••" />
-                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 focus:outline-none">
-                      <i className={`fa-solid ${showConfirmPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
-                    </button>
-                  </div>
-                  {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
+                {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Confirm</label>
+                <div className="relative">
+                  <input name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} type={showConfirmPassword ? "text" : "password"} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg pr-10" placeholder="••••••••" />
+                  <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 focus:outline-none">
+                    <i className={`fa-solid ${showConfirmPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
                 </div>
+                {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
+              </div>
             </div>
 
             {/* Password Strength UI */}
@@ -327,22 +406,22 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
 
             <div className="pt-2">
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-2">Upload ID Proof (Img/PDF, Max 5MB)</label>
-              <input 
-                type="file" 
+              <input
+                type="file"
                 onChange={handleFileChange}
                 accept="image/*,.pdf"
-                className="block w-full text-sm text-slate-500 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-900/30 file:text-blue-700 dark:file:text-blue-300 hover:file:bg-blue-100 dark:hover:file:bg-blue-900/50" 
+                className="block w-full text-sm text-slate-500 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-900/30 file:text-blue-700 dark:file:text-blue-300 hover:file:bg-blue-100 dark:hover:file:bg-blue-900/50"
               />
               {errors.file && <p className="text-red-500 text-xs mt-1">{errors.file}</p>}
             </div>
 
             <div className="flex items-center pt-2">
-                <input type="checkbox" className="h-4 w-4 text-blue-600 rounded border-slate-300 dark:border-slate-600" defaultChecked />
-                <label className="ml-2 text-sm text-slate-600 dark:text-slate-400">I confirm the details provided are correct.</label>
+              <input type="checkbox" className="h-4 w-4 text-blue-600 rounded border-slate-300 dark:border-slate-600" defaultChecked />
+              <label className="ml-2 text-sm text-slate-600 dark:text-slate-400">I confirm the details provided are correct.</label>
             </div>
 
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={handleSubmit}
               disabled={isLoading}
               className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white transition-colors mt-4 bg-purple-600 hover:bg-purple-700 disabled:opacity-70 disabled:cursor-not-allowed"
@@ -350,7 +429,7 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
               {isLoading ? 'Processing...' : 'Submit Registration'}
             </button>
           </form>
-          
+
           <div className="mt-6 text-center text-sm">
             <Link to="/login" className="font-medium text-purple-600 hover:text-purple-500 dark:text-purple-400">Already have an account? Sign In</Link>
           </div>
@@ -359,7 +438,6 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
     </>
   );
 
-  // Conditional Rendering based on `embedded` prop
   if (embedded) {
     return renderFormContent();
   }
@@ -367,7 +445,7 @@ const FacultySignUp: React.FC<FacultySignUpProps> = ({ isDarkMode, toggleTheme, 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8 transition-colors duration-300 relative">
       <div className="absolute top-6 right-6 z-50">
-         <ThemeToggle isDarkMode={isDarkMode} toggleTheme={toggleTheme} />
+        <ThemeToggle isDarkMode={isDarkMode} toggleTheme={toggleTheme} />
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">

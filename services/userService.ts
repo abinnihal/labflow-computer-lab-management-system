@@ -12,7 +12,11 @@ import {
 import { db } from './firebase';
 import { User, UserRole, PermissionLevel } from '../types';
 import { sendNotification } from './notificationService';
-import { loginWithEmail, registerWithEmail } from './auth';
+import {
+  loginWithEmail,
+  // Import the NEW register function (aliased to avoid conflict)
+  registerUser as authRegisterUser
+} from './auth';
 
 // Collection Reference
 const USERS_COLLECTION = "users";
@@ -55,8 +59,11 @@ export const getAllUsers = async (): Promise<User[]> => {
  */
 export const getPendingUsersByRole = async (role: UserRole, department?: string, managedSemesters?: string[]): Promise<User[]> => {
   try {
-    // CRITICAL FIX: Query Firestore using lowercase "student"/"faculty"
+    // CRITICAL FIX: Query Firestore using lowercase "student"/"faculty" if that is how you store it
+    // Or uppercase if you switched. Assuming lowercase based on previous files:
     const dbRole = role.toLowerCase();
+
+    // Note: If your DB uses Uppercase 'STUDENT', change above line to role.toUpperCase()
 
     const q = query(
       collection(db, USERS_COLLECTION),
@@ -73,6 +80,7 @@ export const getPendingUsersByRole = async (role: UserRole, department?: string,
         users = users.filter(u => u.department === department);
       }
       if (managedSemesters && managedSemesters.length > 0) {
+        // If student has no semester, they might not show up.
         users = users.filter(u => u.semester && managedSemesters.includes(u.semester));
       }
     }
@@ -101,7 +109,7 @@ export const authenticateUser = async (
 
     if (!userDoc.exists()) return null;
 
-    // 3. Return mapped User object (handles the Role casing)
+    // 3. Return mapped User object
     return mapDocToUser(fbUser.uid, userDoc.data());
   } catch (error) {
     console.error("Authentication failed:", error);
@@ -117,22 +125,30 @@ export const registerUser = async (
   password: string
 ): Promise<User | null> => {
   try {
-    const firebaseUser = await registerWithEmail(
-      user.email,
-      password,
-      // Ensure we pass lowercase to auth service
-      user.role === UserRole.FACULTY ? "faculty" : "student",
-      {
-        name: user.name,
-        department: user.department
-      }
-    );
+    // Call the NEW authRegisterUser from auth.ts
+    // It handles Firestore creation automatically now.
 
-    const userDoc = await getDoc(doc(db, USERS_COLLECTION, firebaseUser.uid));
-    if (userDoc.exists()) {
-      return mapDocToUser(firebaseUser.uid, userDoc.data());
-    }
-    return null;
+    // Convert string role to Enum if necessary, though User type implies it's already Enum
+    const roleEnum = user.role === UserRole.FACULTY ? UserRole.FACULTY : UserRole.STUDENT;
+
+    const resultData = await authRegisterUser({
+      email: user.email,
+      name: user.name,
+      role: roleEnum, // Pass Enum, not string
+      phone: user.phone,
+      department: user.department,
+      semester: user.semester,
+      studentId: user.studentId
+      // add other fields if needed
+    }, password);
+
+    // Map the result back to our User type
+    return {
+      id: resultData.uid,
+      ...user, // Spread original data
+      status: 'APPROVED' // authRegisterUser defaults to APPROVED
+    } as User;
+
   } catch (error) {
     console.error("Registration error:", error);
     throw error;

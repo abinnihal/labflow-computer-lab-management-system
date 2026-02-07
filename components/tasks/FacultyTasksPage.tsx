@@ -5,9 +5,12 @@ import {
    createTask,
    getSubmissionsForTask,
    updateSubmissionStatus,
-   getTaskStats
+   getTaskStats,
+   deleteTask // <--- NEW IMPORT
 } from '../../services/taskService';
 import { uploadAssignment } from '../../services/storageService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 interface Props {
    user: User;
@@ -25,6 +28,9 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
    const [activeTab, setActiveTab] = useState<TaskTab>('ASSIGNMENT');
    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
+   // --- FIX FLAW 3: Store the actual semester (e.g. "S5") ---
+   const [activeSemester, setActiveSemester] = useState<string>('');
+
    const [selectedTaskForGrading, setSelectedTaskForGrading] = useState<Task | null>(null);
    const [submissions, setSubmissions] = useState<Submission[]>([]);
    const [loading, setLoading] = useState(true);
@@ -37,8 +43,26 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
    const [isSubmitting, setIsSubmitting] = useState(false);
 
    useEffect(() => {
-      refreshTasks();
+      if (subjectId) {
+         fetchSubjectDetails();
+         refreshTasks();
+      }
    }, [user.id, subjectId]);
+
+   // --- NEW: Fetch the real semester for this subject ---
+   const fetchSubjectDetails = async () => {
+      if (!subjectId) return;
+      try {
+         const subDoc = await getDoc(doc(db, 'subjects', subjectId));
+         if (subDoc.exists()) {
+            const data = subDoc.data();
+            // This ensures we get "S5" or "S1" correctly from the database
+            setActiveSemester(data.semester || '');
+         }
+      } catch (err) {
+         console.error("Error fetching subject details", err);
+      }
+   };
 
    const refreshTasks = async () => {
       if (!subjectId) return;
@@ -82,9 +106,10 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
             assignedById: user.id,
             assignedByName: user.name,
             status: 'OPEN',
-            courseId: 'BCA-V', // Legacy field (can be ignored or dynamic based on sem)
 
-            // 3. AUTO-ASSIGN ACTIVE SUBJECT
+            // --- CRITICAL FIX FLAW 3: Save Semester so Students see it ---
+            course: activeSemester,
+
             subjectId: subjectId,
             subjectName: subjectName,
 
@@ -99,6 +124,22 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
          console.error("Failed to create task", error);
          alert("Failed to create task.");
       } finally { setIsSubmitting(false); }
+   };
+
+   // --- FIX FLAW 2: Handle Delete ---
+   const handleDeleteTask = async (e: React.MouseEvent, taskId: string) => {
+      e.stopPropagation(); // Prevent opening the grading panel
+      if (!window.confirm("Are you sure you want to delete this task? All student submissions will be lost.")) return;
+
+      try {
+         await deleteTask(taskId);
+         setTasks(prev => prev.filter(t => t.id !== taskId));
+         if (selectedTaskForGrading?.id === taskId) {
+            setSelectedTaskForGrading(null);
+         }
+      } catch (error) {
+         alert("Failed to delete task.");
+      }
    };
 
    const openGrading = async (task: Task) => {
@@ -132,18 +173,18 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Assignments & Exams</h1>
                <p className="text-slate-500 dark:text-slate-400">
                   Managing: <span className="font-bold text-blue-600">{subjectName}</span>
+                  {/* Show the active semester badge so you know it's working */}
+                  <span className="ml-2 text-xs bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{activeSemester}</span>
                </p>
             </div>
 
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
-               {/* TABS */}
                <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm w-full sm:w-fit">
                   <button onClick={() => setActiveTab('ASSIGNMENT')} className={`flex-1 sm:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ASSIGNMENT' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Assignments</button>
                   <button onClick={() => setActiveTab('LAB_EXAM')} className={`flex-1 sm:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'LAB_EXAM' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Lab Exams</button>
                   <button onClick={() => setActiveTab('PROJECT')} className={`flex-1 sm:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'PROJECT' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Projects</button>
                </div>
 
-               {/* CREATE BUTTON */}
                <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 w-full sm:w-auto justify-center">
                   <i className="fa-solid fa-plus"></i> Create New
                </button>
@@ -160,8 +201,18 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                      </div>
                   ) : (
                      filteredTasks.map(task => (
-                        <div key={task.id} className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border transition-all cursor-pointer group ${selectedTaskForGrading?.id === task.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 dark:border-slate-700 hover:border-blue-400'}`} onClick={() => openGrading(task)}>
-                           <div className="flex justify-between items-start mb-2">
+                        <div key={task.id} className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border transition-all cursor-pointer group relative ${selectedTaskForGrading?.id === task.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 dark:border-slate-700 hover:border-blue-400'}`} onClick={() => openGrading(task)}>
+
+                           {/* --- DELETE BUTTON (Flaw 2 Fix) --- */}
+                           <button
+                              onClick={(e) => handleDeleteTask(e, task.id)}
+                              className="absolute top-4 right-4 text-slate-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 transition-all opacity-0 group-hover:opacity-100"
+                              title="Delete Task"
+                           >
+                              <i className="fa-solid fa-trash"></i>
+                           </button>
+
+                           <div className="flex justify-between items-start mb-2 pr-8">
                               <div>
                                  <h3 className="font-bold text-slate-800 dark:text-white group-hover:text-blue-600 transition-colors inline">{task.title}</h3>
                                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Due: {new Date(task.dueDate).toLocaleDateString()}</p>
@@ -179,7 +230,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                   )}
             </div>
 
-            {/* Grading Panel (Preserved) */}
+            {/* Grading Panel (Unchanged) */}
             <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 p-6 h-[600px] overflow-y-auto">
                {selectedTaskForGrading ? (
                   <>
@@ -237,14 +288,14 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                   <h3 className="text-lg font-bold text-white mb-6">New {activeTab === 'ASSIGNMENT' ? 'Assignment' : activeTab === 'LAB_EXAM' ? 'Lab Exam' : 'Project'}</h3>
                   <div className="space-y-4">
 
-                     {/* REMOVED SUBJECT SELECTOR - NOW AUTOMATIC */}
                      <div className="p-3 bg-blue-900/20 border border-blue-900/30 rounded-lg flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
                            {subjectName.charAt(0)}
                         </div>
                         <div>
                            <p className="text-xs text-blue-400 uppercase font-bold">Assigning To</p>
-                           <p className="text-sm font-bold text-white">{subjectName}</p>
+                           {/* Show the semester being assigned to */}
+                           <p className="text-sm font-bold text-white">{subjectName} ({activeSemester})</p>
                         </div>
                      </div>
 

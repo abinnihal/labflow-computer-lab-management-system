@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { User, UserRole, Lab } from '../../types';
+import { User, UserRole, Lab, TimeTableSlot } from '../../types';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { getUpcomingEvents, GCalEvent } from '../../services/googleCalendarService';
+import { getFacultySchedule } from '../../services/timetableService'; // <--- NEW IMPORT
 import { getAttendanceLogs, AttendanceRecord, getActivitiesForFaculty, StudentActivity, manualCheckIn } from '../../services/attendanceService';
 import { getPendingSubmissionsCount, getTasksByFaculty } from '../../services/taskService';
 import { getPendingMaintenanceCount } from '../../services/maintenanceService';
@@ -35,7 +35,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
   const subjectSemester = localStorage.getItem('activeSemester') || 'All';
 
   // State
-  const [schedule, setSchedule] = useState<GCalEvent[]>([]);
+  const [todayClasses, setTodayClasses] = useState<TimeTableSlot[]>([]); // <--- REPLACED SCHEDULE STATE
   const [loadingSchedule, setLoadingSchedule] = useState(true);
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceRecord[]>([]);
   const [studentActivities, setStudentActivities] = useState<StudentActivity[]>([]);
@@ -77,10 +77,23 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
     try {
       if (!subjectId) return;
 
-      // 1. Load Calendar (Global for Faculty)
-      const events = await getUpcomingEvents();
-      setSchedule(events.slice(0, 3));
-      setLoadingSchedule(false);
+      // 1. Load Timetable (Replaces Google Calendar)
+      try {
+        const allSlots = await getFacultySchedule(user.id);
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const todayName = days[new Date().getDay()];
+
+        // Filter for TODAY and Sort by time
+        const today = allSlots
+          .filter(s => s.dayOfWeek === todayName)
+          .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+        setTodayClasses(today);
+      } catch (e) {
+        console.error("Timetable fetch error", e);
+      } finally {
+        setLoadingSchedule(false);
+      }
 
       // --- SUBJECT MODE DATA ---
       if (contextType === 'SUBJECT') {
@@ -270,7 +283,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
           {/* Quick Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: 'Upcoming Classes', val: schedule.length.toString(), icon: 'fa-chalkboard-user', color: 'bg-blue-500' },
+              { label: 'Upcoming Classes', val: todayClasses.length.toString(), icon: 'fa-chalkboard-user', color: 'bg-blue-500' },
               { label: 'Pending Grading', val: stats.pendingGrading.toString(), icon: 'fa-file-signature', color: 'bg-orange-500' },
               { label: 'Live Attendance', val: stats.liveAttendance.toString(), icon: 'fa-users', color: 'bg-green-500' },
               { label: 'Lab Issues', val: stats.labIssues.toString(), icon: 'fa-triangle-exclamation', color: 'bg-red-500' },
@@ -389,30 +402,34 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
             <div className="space-y-6">
               <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-slate-800 dark:text-white">Schedule</h3>
-                  <span className="text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 px-2 py-1 rounded flex items-center gap-1">
-                    <i className="fa-brands fa-google"></i> Synced
-                  </span>
+                  <h3 className="font-bold text-slate-800 dark:text-white">Today's Classes</h3>
+                  <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">LIVE</span>
                 </div>
+
                 {loadingSchedule ? (
                   <div className="space-y-4 animate-pulse">
-                    {[1, 2, 3].map(i => <div key={i} className="h-10 bg-slate-100 dark:bg-slate-700 rounded"></div>)}
+                    {[1, 2].map(i => <div key={i} className="h-12 bg-slate-100 dark:bg-slate-700 rounded"></div>)}
                   </div>
+                ) : todayClasses.length === 0 ? (
+                  <p className="text-sm text-slate-500 italic py-4 text-center">No classes scheduled for today.</p>
                 ) : (
                   <div className="space-y-4">
-                    {schedule.map((event, idx) => (
-                      <div key={event.id} className="flex gap-4 group">
-                        <div className="flex flex-col items-center min-w-[3rem]">
-                          <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{event.start.dateTime ? new Date(event.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day'}</span>
-                          {idx !== schedule.length - 1 && <div className="h-full w-0.5 bg-slate-200 dark:bg-slate-700 my-1"></div>}
+                    {todayClasses.map((cls, idx) => (
+                      <div key={cls.id} className="flex gap-4 group">
+                        <div className="flex flex-col items-center min-w-[3.5rem]">
+                          <span className="text-xs font-bold text-slate-800 dark:text-white">{cls.startTime}</span>
+                          <span className="text-[10px] text-slate-400">{cls.endTime}</span>
+                          {idx !== todayClasses.length - 1 && <div className="h-full w-0.5 bg-slate-200 dark:bg-slate-700 my-1"></div>}
                         </div>
-                        <div className={`p-3 rounded-r-lg w-full border-l-4 ${idx % 2 === 0 ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500' : 'bg-purple-50 dark:bg-purple-900/20 border-purple-500'}`}>
-                          <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm">{event.summary}</h4>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{event.location || 'Remote'}</p>
+                        <div className="p-3 rounded-r-lg w-full border-l-4 bg-blue-50 dark:bg-blue-900/20 border-blue-500">
+                          <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm">{cls.subjectName}</h4>
+                          <div className="flex justify-between items-center mt-1">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">{cls.course} - {cls.semester}</span>
+                            <span className="text-[10px] bg-white dark:bg-slate-800 px-1.5 rounded border border-slate-200 dark:border-slate-700">{cls.labName}</span>
+                          </div>
                         </div>
                       </div>
                     ))}
-                    {schedule.length === 0 && <p className="text-sm text-slate-500 italic">No events today.</p>}
                   </div>
                 )}
               </div>

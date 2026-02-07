@@ -3,6 +3,7 @@ import {
   addDoc,
   getDocs,
   updateDoc,
+  deleteDoc,
   doc,
   query,
   where,
@@ -199,4 +200,15 @@ export const getTaskStats = async (taskId: string) => {
     approved: subs.filter(s => s.status === 'APPROVED').length,
     rejected: subs.filter(s => s.status === 'REJECTED').length
   };
+};
+
+// --- DELETE TASK ---
+export const deleteTask = async (taskId: string) => {
+  try {
+    await deleteDoc(doc(db, 'tasks', taskId));
+    return true;
+  } catch (error) {
+    console.error("Error deleting task:", error);
+    throw error;
+  }
 };

@@ -21,7 +21,7 @@ import AttendancePage from './components/AttendancePage';
 import AttendanceProgressPage from './components/attendance/AttendanceProgressPage';
 import StudentTasksPage from './components/tasks/StudentTasksPage';
 import FacultyTasksPage from './components/tasks/FacultyTasksPage';
-import LearnersConsole from './components/community/LearnersConsole';
+// import LearnersConsole from './components/community/LearnersConsole'; // <--- REMOVED
 import StudentProfile from './components/profile/StudentProfile';
 import FacultyProfile from './components/profile/FacultyProfile';
 import ManageBookingsPage from './components/bookings/ManageBookingsPage';
@@ -47,7 +47,7 @@ import ThemeToggle from './components/ui/ThemeToggle';
 import Logo from './components/ui/Logo';
 import NotificationCenter from './components/ui/NotificationCenter';
 
-// --- SIDEBAR LINK COMPONENT (The reason your code is cleaner!) ---
+// --- SIDEBAR LINK COMPONENT ---
 const SidebarLink = ({ to, icon, label, badge, onClick }: { to: string, icon: string, label: string, badge?: number, onClick?: () => void }) => {
   const location = useLocation();
   const isActive = location.pathname.startsWith(to);
@@ -103,7 +103,7 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
               <SidebarLink to="/dashboard/bookings" icon="fa-calendar-check" label="Manage Bookings" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/complaints" icon="fa-triangle-exclamation" label="Complaints & Review" badge={badges.issues} onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/notifications" icon="fa-bullhorn" label="Global Notifications" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/moderation" icon="fa-gavel" label="Console Moderation" onClick={() => setSidebarOpen(false)} />
+              {/* <SidebarLink to="/dashboard/moderation" icon="fa-gavel" label="Console Moderation" onClick={() => setSidebarOpen(false)} />  <--- REMOVED */}
               <SidebarLink to="/dashboard/users" icon="fa-users-gear" label="User Management" badge={badges.approvals} onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/labs" icon="fa-server" label="Labs & Inventory" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/profile" icon="fa-id-card" label="Profile" onClick={() => setSidebarOpen(false)} />
@@ -131,7 +131,7 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
               <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Schedule" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Assignments" badge={badges.tasks} onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/resources" icon="fa-book-open" label="Resource Hub" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/community" icon="fa-users" label="Community" onClick={() => setSidebarOpen(false)} />
+              {/* <SidebarLink to="/dashboard/community" icon="fa-users" label="Community" onClick={() => setSidebarOpen(false)} /> <--- REMOVED */}
               <SidebarLink to="/dashboard/ai-chat" icon="fa-robot" label="Lab Assistant" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/support" icon="fa-headset" label="Support" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/profile" icon="fa-id-card" label="My Profile" onClick={() => setSidebarOpen(false)} />
@@ -190,7 +190,7 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
 
               <Route path="calendar" element={<CalendarView user={user} />} />
               <Route path="bookings" element={<ManageBookingsPage user={user} />} />
-              <Route path="community" element={<LearnersConsole user={user} />} />
+              {/* <Route path="community" element={<LearnersConsole user={user} />} /> <--- REMOVED */}
               <Route path="resources" element={user.role === UserRole.STUDENT ? <StudentResourcesPage user={user} /> : <FacultyResourcesPage user={user} />} />
               <Route path="tasks" element={user.role === UserRole.STUDENT ? <StudentTasksPage user={user} /> : <FacultyTasksPage user={user} />} />
               <Route path="attendance" element={<AttendancePage user={user} />} />

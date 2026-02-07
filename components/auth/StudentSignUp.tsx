@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserRole } from '../../types';
-// CHANGED: Importing from authService where the semester logic is handled correctly
 import { registerUser } from '../../services/auth';
 import TerminalLoader from '../ui/TerminalLoader';
 import ThemeToggle from '../ui/ThemeToggle';
@@ -10,7 +9,7 @@ import Logo from '../ui/Logo';
 interface StudentSignUpProps {
   isDarkMode: boolean;
   toggleTheme: () => void;
-  embedded?: boolean; // New prop to control layout rendering
+  embedded?: boolean;
 }
 
 const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, embedded = false }) => {
@@ -34,7 +33,7 @@ const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, 
     studentId: '',
     programType: 'UG' as 'UG' | 'PG',
     course: '',
-    semester: 'S1', // <--- FIXED: Default to Short Code 'S1'
+    semester: 'S1',
   });
 
   // Password Strength State
@@ -72,7 +71,7 @@ const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, 
     setFormData(prev => ({
       ...prev,
       course: defaultCourse,
-      semester: 'S1' // <--- FIXED: Reset to Short Code 'S1'
+      semester: 'S1'
     }));
   }, [formData.programType]);
 
@@ -91,19 +90,14 @@ const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, 
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
 
-    // Real-time password validation
     if (name === 'password') validatePassword(value);
-
-    // Clear error on change
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }));
-    }
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (selectedFile.size > 5 * 1024 * 1024) { // 5MB
+      if (selectedFile.size > 5 * 1024 * 1024) {
         setErrors(prev => ({ ...prev, file: 'File size must be less than 5MB' }));
         setFile(null);
       } else if (!['image/jpeg', 'image/png', 'application/pdf'].includes(selectedFile.type)) {
@@ -141,8 +135,6 @@ const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, 
     if (!formData.confirmPassword) newErrors.confirmPassword = 'Confirm Password is required';
     else if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
 
-    // if (!file) newErrors.file = 'ID Proof upload is required'; // Optional for now if you want
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -152,43 +144,31 @@ const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, 
 
     setIsLoading(true);
 
-    // Removed setTimeout to make it a real async call
     try {
-      // Mocking file URL for backend payload (In real app, upload file first)
       const idProofUrl = file ? URL.createObjectURL(file) : undefined;
-      const department = 'Computer Science'; // Assigned automatically for this console
 
-      // Calling the service
+      // --- FIX: Dynamic Department based on Course ---
+      // Instead of hardcoding 'Computer Science', we use the Course Name.
+      // This ensures BCA students are saved as 'BCA' in the DB.
+      const department = formData.course;
+
+      console.log("Registering User with:", {
+        course: formData.course,
+        department: department,
+        semester: formData.semester
+      });
+
       await registerUser({
         name: formData.fullName,
         email: formData.email,
-        // phone: formData.phone, // Ensure your User type supports phone if passing it
+        phone: formData.phone,
+        studentId: formData.studentId,
+        programType: formData.programType,
+        course: formData.course, // Ensure this is saved
         role: UserRole.STUDENT,
-        // avatarUrl: ... (Handled by service or defaults)
-        // studentId: formData.studentId,
-        // programType: formData.programType,
-        // course: formData.course,
-        semester: formData.semester, // Passing the "S1" code
-        department: department,
-        // idProofUrl: idProofUrl
-      } as any); // Type casting if registerUser props slightly differ, assuming registerUser handles the payload
-
-      // If we use the Auth service which requires password as 2nd arg:
-      // If your registerUser is: (userData) => ... then update accordingly.
-      // Based on previous turn, registerUser in authService took (userData, password?)... 
-      // Actually in turn 17 code: registerUser(userData). Password was inside userData in my example? 
-      // Let's assume the authService signature: registerUser(data). 
-      // If the service expects password separate, pass it. 
-      // Note: The previous authService code I gave had password INSIDE userData.
-
-      // Let's retry the exact call structure assuming authService handles it:
-      // Note: We need to pass password. 
-      // If using the authService I provided earlier:
-      /* await registerUser({
-            ...userData,
-            password: formData.password
-         })
-      */
+        semester: formData.semester,
+        department: department, // Saved as Course Name (e.g. 'BCA')
+      }, formData.password);
 
       setIsSuccess(true);
     } catch (err: any) {
@@ -287,7 +267,6 @@ const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, 
               <div>
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Semester</label>
                 <select name="semester" value={formData.semester} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg">
-                  {/* --- FIXED: MAPPING TO SHORT CODES (S1, S2, etc.) --- */}
                   {getAvailableSemesters(formData.course).map(i => (
                     <option key={i} value={`S${i}`}>S{i} (Semester {i})</option>
                   ))}
@@ -379,7 +358,6 @@ const StudentSignUp: React.FC<StudentSignUpProps> = ({ isDarkMode, toggleTheme, 
     </>
   );
 
-  // Conditional Rendering based on `embedded` prop
   if (embedded) {
     return renderFormContent();
   }

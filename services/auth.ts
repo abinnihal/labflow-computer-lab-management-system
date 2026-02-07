@@ -113,7 +113,10 @@ export const registerUser = async (
             name: userData.name,
             email: userData.email,
             role: userData.role,
-            status: 'APPROVED',
+
+            // --- CRITICAL FIX: Set status to PENDING so Admin must approve ---
+            status: 'PENDING',
+
             createdAt: new Date().toISOString(),
         };
 
@@ -136,15 +139,13 @@ export const registerUser = async (
     }
 };
 
-// --- [FIX] BACKWARD COMPATIBILITY ---
-// This function was missing, causing userService.ts to crash.
+// --- BACKWARD COMPATIBILITY ---
 export const registerWithEmail = async (
     email: string,
     password: string,
     role: UserRole,
     extraData?: any
 ) => {
-    // We map the old style call to the new registerUser function
     return registerUser({
         email,
         name: extraData?.name || '',

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { User, UserRole, Lab } from '../../types';
+import { User, UserRole } from '../../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getAttendanceLogs } from '../../services/attendanceService';
 import { getAllLabs } from '../../services/labService';
 import { getPendingFeedbackCount } from '../../services/maintenanceService';
 import ApprovalList from '../approvals/ApprovalList';
 import { getPendingUsersByRole } from '../../services/userService';
+import MasterTimeTablePage from '../admin/MasterTimeTablePage'; // <--- IMPORT THIS
 
 interface Props {
    user: User;
@@ -13,7 +14,8 @@ interface Props {
 
 const AdminDashboard: React.FC<Props> = ({ user }) => {
    const [activeStudents, setActiveStudents] = useState(0);
-   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'APPROVALS'>('OVERVIEW');
+   // Updated State type to include TIMETABLE
+   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'APPROVALS' | 'TIMETABLE'>('OVERVIEW');
    const [pendingCount, setPendingCount] = useState(0);
 
    // Real-time Data
@@ -24,19 +26,21 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
    const [loading, setLoading] = useState(true);
 
    useEffect(() => {
-      // WRAPPER FOR ASYNC CALLS
+      // Optimization: Don't fetch dashboard stats if looking at Timetable
+      if (activeTab === 'TIMETABLE') return;
+
       const fetchData = async () => {
          setLoading(true);
          try {
-            // 1. Fetch Logs (ASYNC FIX)
+            // 1. Fetch Logs
             const logs = await getAttendanceLogs();
             setActiveStudents(logs.filter(l => l.status === 'PRESENT').length);
 
-            // 2. Fetch Pending Faculty (ASYNC FIX)
+            // 2. Fetch Pending Faculty
             const pendingFaculty = await getPendingUsersByRole(UserRole.FACULTY);
             setPendingCount(pendingFaculty.length);
 
-            // 3. Fetch Labs & Calculate Usage (ASYNC FIX)
+            // 3. Fetch Labs & Calculate Usage
             const labs = await getAllLabs();
             setTotalLabs(labs.length);
 
@@ -54,10 +58,9 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
             // 4. Count Active Labs
             setActiveLabsCount(usage.filter(u => u.activeCount > 0).length);
 
-            // 5. Fetch Pending Feedback (Assuming sync or handle async if service updated)
-            // If getPendingFeedbackCount is async now, add await. If not, this is fine.
+            // 5. Fetch Pending Feedback
             try {
-               const fbCount = await getPendingFeedbackCount(); // Added await just in case
+               const fbCount = await getPendingFeedbackCount();
                setFeedbackCount(fbCount);
             } catch {
                setFeedbackCount(0);
@@ -89,6 +92,15 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
                >
                   Overview
                </button>
+
+               {/* --- NEW TIMETABLE TAB --- */}
+               <button
+                  onClick={() => setActiveTab('TIMETABLE')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'TIMETABLE' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+               >
+                  Time Table
+               </button>
+
                <button
                   onClick={() => setActiveTab('APPROVALS')}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'APPROVALS' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
@@ -103,7 +115,10 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
             </div>
          </div>
 
-         {activeTab === 'APPROVALS' ? (
+         {/* Content Rendering Logic */}
+         {activeTab === 'TIMETABLE' ? (
+            <MasterTimeTablePage />
+         ) : activeTab === 'APPROVALS' ? (
             <ApprovalList targetRole={UserRole.FACULTY} />
          ) : (
             <>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Subject } from '../../types';
+import { User } from '../../types';
 import {
     uploadResource,
     getResourcesBySubject,
@@ -7,15 +7,18 @@ import {
     ResourceFile
 } from '../../services/resourceService';
 import { db } from '../../services/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface Props {
     user: User;
 }
 
 const FacultyResourcesPage: React.FC<Props> = ({ user }) => {
-    const [subjects, setSubjects] = useState<Subject[]>([]);
-    const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
+    // 1. GET ACTIVE CONTEXT
+    const subjectId = localStorage.getItem('activeSubjectId');
+    const subjectName = localStorage.getItem('activeSubjectName') || 'General';
+
+    const [activeSemester, setActiveSemester] = useState<string>('');
     const [resources, setResources] = useState<ResourceFile[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -27,39 +30,38 @@ const FacultyResourcesPage: React.FC<Props> = ({ user }) => {
         file: null as File | null
     });
 
-    // 1. Fetch Faculty's Subjects on Load
+    // 2. Fetch Subject Details (Semester) on Load
     useEffect(() => {
-        const fetchFacultySubjects = async () => {
-            try {
-                const q = query(collection(db, 'subjects'), where('facultyId', '==', user.id));
-                const snapshot = await getDocs(q);
-                const subjList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject));
-                setSubjects(subjList);
-
-                // Auto-select first subject if available
-                if (subjList.length > 0) {
-                    setSelectedSubject(subjList[0]);
-                }
-            } catch (err) {
-                console.error("Error loading subjects:", err);
+        const initPage = async () => {
+            if (subjectId) {
+                await fetchSubjectDetails();
+                loadResources(); // Load resources immediately after checking context
             }
         };
-        fetchFacultySubjects();
-    }, [user.id]);
+        initPage();
+    }, [subjectId]);
 
-    // 2. Fetch Resources when Subject Changes
-    useEffect(() => {
-        if (selectedSubject) {
-            loadResources();
+    const fetchSubjectDetails = async () => {
+        if (!subjectId) return;
+        try {
+            const subDoc = await getDoc(doc(db, 'subjects', subjectId));
+            if (subDoc.exists()) {
+                setActiveSemester(subDoc.data().semester || '');
+            }
+        } catch (err) {
+            console.error("Error fetching subject details:", err);
         }
-    }, [selectedSubject]);
+    };
 
+    // 3. Load Resources
     const loadResources = async () => {
-        if (!selectedSubject) return;
+        if (!subjectId) return;
         setIsLoading(true);
         try {
-            // Fetch resources for this specific subject
-            const files = await getResourcesBySubject(selectedSubject.semester, selectedSubject.id);
+            // We need the semester to fetch correctly if utilizing the student-side query logic,
+            // but for faculty, we primarily filter by subjectId in the service.
+            // Passing activeSemester ensures compatibility.
+            const files = await getResourcesBySubject(activeSemester, subjectId);
             setResources(files);
         } catch (error) {
             console.error(error);
@@ -68,20 +70,19 @@ const FacultyResourcesPage: React.FC<Props> = ({ user }) => {
         }
     };
 
-    // 3. Handle File Upload
+    // 4. Handle File Upload
     const handleUpload = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedSubject || !uploadData.file) return;
+        if (!subjectId || !uploadData.file) return;
 
         setIsUploading(true);
         try {
-            // Service now handles Cloudinary upload automatically
             await uploadResource(uploadData.file, {
                 title: uploadData.title,
                 description: uploadData.description,
-                subjectId: selectedSubject.id,
-                subjectName: selectedSubject.name,
-                semester: selectedSubject.semester,
+                subjectId: subjectId,
+                subjectName: subjectName,
+                semester: activeSemester, // Crucial for Student filtering
                 uploadedBy: user.name
             });
 
@@ -98,7 +99,7 @@ const FacultyResourcesPage: React.FC<Props> = ({ user }) => {
         }
     };
 
-    // 4. Handle Delete (Updated for Cloudinary - Removed storagePath)
+    // 5. Handle Delete
     const handleDelete = async (fileId: string) => {
         if (!window.confirm("Are you sure you want to delete this file?")) return;
         try {
@@ -109,28 +110,25 @@ const FacultyResourcesPage: React.FC<Props> = ({ user }) => {
         }
     };
 
+    if (!subjectId) {
+        return (
+            <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                <i className="fa-solid fa-folder-open text-4xl mb-4 opacity-50"></i>
+                <p>Please select a subject from the Dashboard to view resources.</p>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Class Resources</h1>
-                    <p className="text-slate-500 dark:text-slate-400">Upload study materials for your students.</p>
+                    <p className="text-slate-500 dark:text-slate-400">
+                        Managing: <span className="font-bold text-blue-600">{subjectName}</span>
+                        {activeSemester && <span className="ml-2 text-xs bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{activeSemester}</span>}
+                    </p>
                 </div>
-
-                {/* Subject Selector Dropdown */}
-                {subjects.length > 0 ? (
-                    <select
-                        className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-white font-bold"
-                        value={selectedSubject?.id || ''}
-                        onChange={(e) => setSelectedSubject(subjects.find(s => s.id === e.target.value) || null)}
-                    >
-                        {subjects.map(s => (
-                            <option key={s.id} value={s.id}>{s.name} ({s.semester})</option>
-                        ))}
-                    </select>
-                ) : (
-                    <span className="text-red-500 text-sm font-bold bg-red-50 px-3 py-1 rounded">No subjects assigned yet.</span>
-                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -176,7 +174,7 @@ const FacultyResourcesPage: React.FC<Props> = ({ user }) => {
                             </div>
                             <button
                                 type="submit"
-                                disabled={isUploading || !selectedSubject}
+                                disabled={isUploading}
                                 className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm transition-all disabled:opacity-50 flex justify-center items-center gap-2"
                             >
                                 {isUploading ? <><i className="fa-solid fa-spinner fa-spin"></i> Uploading...</> : 'Upload Resource'}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Booking, Task, AttendanceLog, Subject } from '../../types';
+import { User, Task, AttendanceLog, Subject, TimeTableSlot } from '../../types';
 import {
   getStudentStatus,
   checkInStudent,
@@ -7,9 +7,10 @@ import {
   getLogsByStudent,
   submitActivity
 } from '../../services/attendanceService';
-import { getNextLabSession, getAllBookings } from '../../services/bookingService';
+import { getAllBookings } from '../../services/bookingService';
 import { getTasksForStudent } from '../../services/taskService';
-import { getStudentSubjects } from '../../services/subjectService'; // <--- NEW IMPORT
+import { getStudentSubjects } from '../../services/subjectService';
+import { getCurrentLabSession, getClassSchedule } from '../../services/timetableService'; // <--- NEW IMPORTS
 import { Link } from 'react-router-dom';
 import CheckInModal from '../attendance/CheckInModal';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
@@ -73,11 +74,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [attendanceAvg, setAttendanceAvg] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [nextBooking, setNextBooking] = useState<Booking | null>(null);
   const [pendingTasks, setPendingTasks] = useState<Task[]>([]);
-
-  // --- NEW: SUBJECTS STATE ---
   const [subjects, setSubjects] = useState<Subject[]>([]);
+
+  // --- NEW TIMETABLE STATE ---
+  const [activeSession, setActiveSession] = useState<TimeTableSlot | null>(null);
+  const [nextClass, setNextClass] = useState<TimeTableSlot | null>(null);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -103,15 +105,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         console.error("Error fetching stats:", error);
       }
 
-      // 3. Next Lab
-      try {
-        const next = await getNextLabSession(user.id);
-        setNextBooking(next);
-      } catch (error) {
-        console.error("Error fetching next session:", error);
-      }
-
-      // 4. Pending Tasks
+      // 3. Pending Tasks
       try {
         const tasksData = await getTasksForStudent(user.id);
         const pending = tasksData
@@ -122,7 +116,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         console.error("Error fetching tasks:", error);
       }
 
-      // 5. --- NEW: FETCH SUBJECTS ---
+      // 4. Fetch Subjects
       try {
         const semester = user.semester || (user.managedSemesters ? user.managedSemesters[0] : '');
         if (semester) {
@@ -132,11 +126,42 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
       } catch (error) {
         console.error("Error fetching subjects", error);
       }
+
+      // 5. --- NEW: TIMETABLE INTEGRATION ---
+      try {
+        // Fallback: If user.course is missing, default to 'BCA' (or handle gracefully)
+        const studentCourse = user.course || 'BCA';
+        const studentSemester = user.semester || '';
+
+        if (studentSemester) {
+          // A. Check for ACTIVE class right now
+          const current = await getCurrentLabSession(studentCourse, studentSemester);
+          setActiveSession(current);
+
+          // B. Find NEXT class today
+          const allSlots = await getClassSchedule(studentCourse, studentSemester);
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const todayName = days[new Date().getDay()];
+
+          // Filter for today's classes
+          const todaySlots = allSlots.filter(s => s.dayOfWeek === todayName);
+
+          // Find upcoming class
+          const nowVal = new Date().getHours() * 60 + new Date().getMinutes();
+          const next = todaySlots.find(s => {
+            const [h, m] = s.startTime.split(':').map(Number);
+            return (h * 60 + m) > nowVal;
+          });
+          setNextClass(next || null);
+        }
+      } catch (error) {
+        console.error("Timetable Error:", error);
+      }
     };
 
     fetchDashboardData();
 
-  }, [user.id, refreshTrigger, user.semester]);
+  }, [user.id, refreshTrigger, user.semester, user.course]);
 
   const handleToggleAttendance = async () => {
     if (isCheckedIn) {
@@ -205,7 +230,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 transform skew-x-12"></div>
       </div>
 
-      {/* Active Class / Check In Card */}
+      {/* --- ACTIVE CLASS / CHECK IN CARD (UPDATED) --- */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 transition-colors">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-4 w-full md:w-auto">
@@ -214,14 +239,16 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                {isCheckedIn ? 'Current Session Active' : 'Ready for Lab?'}
+                {isCheckedIn ? 'Session Active' : (activeSession ? 'Class in Progress' : 'Ready for Lab?')}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {isCheckedIn && currentRecord
-                  ? `Checked in at ${new Date(currentRecord.checkInTime).toLocaleTimeString()}`
-                  : nextBooking
-                    ? `Next: ${nextBooking.subject} at ${new Date(nextBooking.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                    : 'No upcoming lab sessions scheduled.'
+                  ? `Checked in at ${new Date(currentRecord.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  : activeSession
+                    ? `HAPPENING NOW: ${activeSession.subjectName} in ${activeSession.labName}`
+                    : nextClass
+                      ? `Next: ${nextClass.subjectName} at ${nextClass.startTime}`
+                      : 'No upcoming classes today.'
                 }
               </p>
             </div>
@@ -229,9 +256,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
           <button
             onClick={handleToggleAttendance}
-            disabled={processing}
+            // Disable if user is NOT checked in AND there is NO active session
+            disabled={processing || (!isCheckedIn && !activeSession)}
             className={`w-full md:w-64 py-3.5 rounded-xl font-bold text-white shadow-md transition-all flex items-center justify-center gap-2 text-lg transform hover:scale-[1.02] ${processing ? 'bg-slate-400 dark:bg-slate-600 cursor-wait' :
-              isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : 'bg-green-600 hover:bg-green-700 shadow-green-500/20'
+              isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' :
+                activeSession ? 'bg-green-600 hover:bg-green-700 shadow-green-500/20 animate-pulse' :
+                  'bg-slate-300 dark:bg-slate-700 cursor-not-allowed text-slate-500'
               }`}
           >
             {processing ? (
@@ -239,7 +269,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
             ) : isCheckedIn ? (
               <><i className="fa-solid fa-right-from-bracket"></i> Check Out</>
             ) : (
-              <><i className="fa-solid fa-right-to-bracket"></i> Check In</>
+              <><i className="fa-solid fa-right-to-bracket"></i> Check In Now</>
             )}
           </button>
         </div>
@@ -258,7 +288,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         )}
       </div>
 
-      {/* --- NEW SECTION: MY SUBJECTS --- */}
+      {/* --- MY SUBJECTS --- */}
       <div>
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">

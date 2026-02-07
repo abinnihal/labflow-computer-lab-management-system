@@ -294,3 +294,21 @@ export interface Subject {
   facultyName: string; // Cached for display
   semester: string;    // e.g., "S5"
 }
+
+export interface TimeTableSlot {
+  id: string;
+  dayOfWeek: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+  startTime: string;
+  endTime: string;
+
+  semester: string; // "S1"
+  course: string;   // <--- NEW FIELD: "BCA", "B.Sc CS", etc.
+  batch?: string;   // "A", "B"
+
+  subjectId: string;
+  subjectName: string;
+  facultyId: string;
+  facultyName: string;
+  labId: string;
+  labName: string;
+}

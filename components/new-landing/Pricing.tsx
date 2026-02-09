@@ -12,7 +12,7 @@ const MODULE_DATA = {
             "Check-in/check-out with timestamps",
             "Task submission (PDF/ZIP/TXT)",
             "AI problem-solving window",
-            "Learner’s microblogging console",
+            "Exam mode",
             "Feedback submission",
             "Lab history (attended/missed)"
         ]
@@ -69,8 +69,8 @@ const SystemModules: React.FC = () => {
                             key={role}
                             onClick={() => setActiveModule(role)}
                             className={`px-8 py-3 rounded-xl text-sm font-bold transition-all duration-300 border flex items-center gap-2 ${activeModule === role
-                                    ? 'bg-brand-green text-white border-brand-green shadow-[0_0_20px_rgba(14,165,233,0.3)]'
-                                    : 'bg-brand-card text-gray-400 border-white/10 hover:border-white/30'
+                                ? 'bg-brand-green text-white border-brand-green shadow-[0_0_20px_rgba(14,165,233,0.3)]'
+                                : 'bg-brand-card text-gray-400 border-white/10 hover:border-white/30'
                                 }`}
                         >
                             {role}

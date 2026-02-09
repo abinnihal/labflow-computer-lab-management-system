@@ -10,6 +10,7 @@ const Marquee: React.FC = () => {
         "Tailwind CSS",
         "React Router",
         "Lucide Icons",
+        "Cloudinary",
     ];
 
 

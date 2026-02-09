@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { getUpcomingEvents, initGoogleClient, signInToGoogle, GCalEvent, deleteEvent } from '../services/googleCalendarService';
 import { getAllBookings } from '../services/bookingService';
-import { User, UserRole } from '../types';
+import { getClassSchedule, getFacultySchedule } from '../services/timetableService';
+import { User, UserRole, TimeTableSlot } from '../types';
 import BookingModal from './bookings/BookingModal';
 import TerminalLoader from './ui/TerminalLoader';
 
@@ -16,8 +16,8 @@ const CalendarView: React.FC<Props> = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // View Mode State
-  const [viewMode, setViewMode] = useState<'MONTH' | 'WEEK' | 'DAY'>('MONTH');
+  // CHANGED: Default View is now 'DAY'
+  const [viewMode, setViewMode] = useState<'MONTH' | 'WEEK' | 'DAY'>('DAY');
 
   // Booking Modal State
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
@@ -25,22 +25,65 @@ const CalendarView: React.FC<Props> = ({ user }) => {
   useEffect(() => {
     const initialize = async () => {
       await initGoogleClient();
-      // Auto-connect simulation for demo purposes
       setIsConnected(true);
       fetchEvents();
     };
     initialize();
-  }, []);
+  }, [user, currentDate]);
 
   const fetchEvents = async () => {
     setLoading(true);
+
     // 1. Fetch Google Calendar Events
     const googleEvents = await getUpcomingEvents();
 
-    // 2. Fetch System Bookings (ADD 'await' HERE)
+    // 2. Fetch System Bookings
     const systemBookings = await getAllBookings();
 
-    // 3. Map Bookings to Unified Event Structure
+    // 3. Fetch Master Timetable (Recurring)
+    let timetableSlots: TimeTableSlot[] = [];
+    if (user) {
+      if (user.role === UserRole.STUDENT) {
+        const course = user.course || 'BCA';
+        const sem = user.semester || 'S1';
+        timetableSlots = await getClassSchedule(course, sem);
+      } else if (user.role === UserRole.FACULTY) {
+        timetableSlots = await getFacultySchedule(user.id);
+      }
+    }
+
+    // --- GENERATE RECURRING EVENTS FOR CURRENT MONTH ---
+    const recurringEvents: GCalEvent[] = [];
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d);
+      const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+
+      const daysSlots = timetableSlots.filter(s => s.dayOfWeek === dayName);
+
+      daysSlots.forEach(slot => {
+        const [startH, startM] = slot.startTime.split(':').map(Number);
+        const [endH, endM] = slot.endTime.split(':').map(Number);
+
+        const startDt = new Date(year, month, d, startH, startM);
+        const endDt = new Date(year, month, d, endH, endM);
+
+        recurringEvents.push({
+          id: `recur-${slot.id}-${d}`,
+          summary: slot.subjectName,
+          description: `Regular Class (${slot.course}-${slot.semester})`,
+          location: slot.labName,
+          start: { dateTime: startDt.toISOString() },
+          end: { dateTime: endDt.toISOString() },
+          status: 'APPROVED'
+        });
+      });
+    }
+
+    // 4. Map Bookings
     const bookingEvents: GCalEvent[] = systemBookings
       .filter(b => b.status !== 'REJECTED')
       .map(b => ({
@@ -53,8 +96,8 @@ const CalendarView: React.FC<Props> = ({ user }) => {
         status: b.status
       }));
 
-    // 4. Merge and Sort
-    const allEvents = [...googleEvents, ...bookingEvents].sort((a, b) => {
+    // 5. Merge and Sort
+    const allEvents = [...googleEvents, ...bookingEvents, ...recurringEvents].sort((a, b) => {
       const dateA = new Date(a.start.dateTime || a.start.date || '');
       const dateB = new Date(b.start.dateTime || b.start.date || '');
       return dateA.getTime() - dateB.getTime();
@@ -76,18 +119,22 @@ const CalendarView: React.FC<Props> = ({ user }) => {
 
   const handleDelete = async (eventId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (eventId.startsWith('recur-')) {
+      alert("Cannot delete a recurring class from here. Please contact Admin.");
+      return;
+    }
     if (window.confirm("Are you sure you want to delete this event?")) {
       await deleteEvent(eventId);
-      fetchEvents(); // Refresh list
+      fetchEvents();
     }
   };
 
   // --- Render Helpers ---
 
   const getEventStyle = (ev: GCalEvent) => {
+    if (ev.id.startsWith('recur-')) return 'bg-purple-100 border-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200 dark:border-purple-800';
     if (ev.status === 'PENDING') return 'bg-orange-100 border-orange-200 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800';
     if (ev.status === 'APPROVED') return 'bg-green-100 border-green-200 text-green-800 dark:bg-green-900/40 dark:text-green-200 dark:border-green-800';
-    // Completed or External
     return 'bg-blue-100 border-blue-200 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-800';
   };
 
@@ -98,12 +145,10 @@ const CalendarView: React.FC<Props> = ({ user }) => {
     const firstDayOfMonth = new Date(year, month, 1).getDay();
 
     const days = [];
-    // Empty slots for previous month
     for (let i = 0; i < firstDayOfMonth; i++) {
       days.push(<div key={`empty-${i}`} className="h-24 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700"></div>);
     }
 
-    // Days of current month
     for (let i = 1; i <= daysInMonth; i++) {
       const dateStr = new Date(year, month, i).toDateString();
       const dayEvents = events.filter(e => {
@@ -136,7 +181,7 @@ const CalendarView: React.FC<Props> = ({ user }) => {
   const renderWeekView = () => {
     const startOfWeek = new Date(currentDate);
     const day = currentDate.getDay();
-    const diff = currentDate.getDate() - day; // Adjust to Sunday
+    const diff = currentDate.getDate() - day;
     startOfWeek.setDate(diff);
 
     const weekDays = [];
@@ -228,7 +273,7 @@ const CalendarView: React.FC<Props> = ({ user }) => {
                   </div>
                 )}
               </div>
-              {user?.role === UserRole.ADMIN && (
+              {user?.role === UserRole.ADMIN && !ev.id.startsWith('recur-') && (
                 <button onClick={(e) => handleDelete(ev.id, e)} className="text-slate-400 hover:text-red-500 self-start p-1">
                   <i className="fa-solid fa-trash-can"></i>
                 </button>
@@ -279,10 +324,11 @@ const CalendarView: React.FC<Props> = ({ user }) => {
           )}
         </div>
 
+        {/* CHANGED: Reordered buttons to Day | Week | Month */}
         <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
-          <button onClick={() => setViewMode('MONTH')} className={`px-3 py-1.5 text-sm font-bold rounded transition-colors ${viewMode === 'MONTH' ? 'bg-slate-800 dark:bg-slate-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>Month</button>
-          <button onClick={() => setViewMode('WEEK')} className={`px-3 py-1.5 text-sm font-bold rounded transition-colors ${viewMode === 'WEEK' ? 'bg-slate-800 dark:bg-slate-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>Week</button>
           <button onClick={() => setViewMode('DAY')} className={`px-3 py-1.5 text-sm font-bold rounded transition-colors ${viewMode === 'DAY' ? 'bg-slate-800 dark:bg-slate-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>Day</button>
+          <button onClick={() => setViewMode('WEEK')} className={`px-3 py-1.5 text-sm font-bold rounded transition-colors ${viewMode === 'WEEK' ? 'bg-slate-800 dark:bg-slate-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>Week</button>
+          <button onClick={() => setViewMode('MONTH')} className={`px-3 py-1.5 text-sm font-bold rounded transition-colors ${viewMode === 'MONTH' ? 'bg-slate-800 dark:bg-slate-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>Month</button>
         </div>
       </div>
 
@@ -336,7 +382,7 @@ const CalendarView: React.FC<Props> = ({ user }) => {
 
         </div>
 
-        {/* Sidebar List */}
+        {/* Sidebar List (Keeping as is) */}
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 h-fit transition-colors">
           <h3 className="font-bold text-slate-800 dark:text-white mb-4">Upcoming Schedule</h3>
           {loading ? (
@@ -346,7 +392,7 @@ const CalendarView: React.FC<Props> = ({ user }) => {
           ) : events.length > 0 ? (
             <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
               {events.slice(0, 8).map((event) => (
-                <div key={event.id} className="relative pl-4 border-l-2 border-blue-400 group">
+                <div key={event.id} className={`relative pl-4 border-l-2 group ${event.id.startsWith('recur-') ? 'border-purple-400' : 'border-blue-400'}`}>
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-xs text-slate-400 dark:text-slate-500 font-medium mb-0.5">
@@ -354,7 +400,7 @@ const CalendarView: React.FC<Props> = ({ user }) => {
                       </p>
                       <h4 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">{event.summary}</h4>
                     </div>
-                    {isAdmin && (
+                    {isAdmin && !event.id.startsWith('recur-') && (
                       <button
                         onClick={(e) => handleDelete(event.id, e)}
                         className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"

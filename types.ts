@@ -183,7 +183,7 @@ export interface AttendanceLog {
   checkInTime: string;
   checkOutTime?: string;
   // FIX: Added 'COMPLETED' and 'PENDING' to allowed statuses
-  status: 'PRESENT' | 'ABSENT' | 'LATE' | 'COMPLETED' | 'PENDING';
+  status: 'PRESENT' | 'ABSENT' | 'LATE' | 'COMPLETED' | 'PENDING' | 'EARLY_LEAVE';
   labId?: string;
   systemNumber?: number;
   date?: string;
@@ -295,15 +295,19 @@ export interface Subject {
   semester: string;    // e.g., "S5"
 }
 
+// src/types.ts
+
+// ... existing types ...
+
 export interface TimeTableSlot {
   id: string;
   dayOfWeek: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
-  startTime: string;
-  endTime: string;
+  startTime: string; // "09:00"
+  endTime: string;   // "10:00"
 
-  semester: string; // "S1"
-  course: string;   // <--- NEW FIELD: "BCA", "B.Sc CS", etc.
-  batch?: string;   // "A", "B"
+  semester: string;  // "S5"
+  course: string;    // <--- NEW: "BCA", "B.Sc CS", etc.
+  batch?: string;    // "A", "B", "ALL"
 
   subjectId: string;
   subjectName: string;

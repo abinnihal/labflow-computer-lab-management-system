@@ -30,11 +30,11 @@ const Features: React.FC = () => {
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <div className="w-1.5 h-1.5 rounded-full bg-brand-green mt-2"></div>
-                                    <span>Real-time lab usage monitoring</span>
+                                    <span>Real-time Students check-in check-out</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <div className="w-1.5 h-1.5 rounded-full bg-brand-green mt-2"></div>
-                                    <span>Centralized microblogging communication</span>
+                                    <span>Centralized task assignment & Submission</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <div className="w-1.5 h-1.5 rounded-full bg-brand-green mt-2"></div>
@@ -56,7 +56,7 @@ const Features: React.FC = () => {
                                 step: "Step 1",
                                 title: "Scheduling",
                                 icon: Clock,
-                                desc: "Faculty books slots. Conflict checker ensures availability. Students are notified via WhatsApp & Calendar."
+                                desc: "Faculty books slots. Conflict checker ensures availability. Students are notified via in app notification sysytem."
                             },
                             {
                                 step: "Step 2",
@@ -68,7 +68,7 @@ const Features: React.FC = () => {
                                 step: "Step 3",
                                 title: "Submission",
                                 icon: File,
-                                desc: "Tasks are assigned and submitted (PDF/ZIP). Microblogging console enables peer communication."
+                                desc: "Tasks are assigned and submitted (PDF/ZIP). Smart in built Exam Mode ensures effective lab exam management ."
                             },
                             {
                                 step: "Step 4",

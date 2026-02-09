@@ -10,7 +10,7 @@ import {
 import { getAllBookings } from '../../services/bookingService';
 import { getTasksForStudent } from '../../services/taskService';
 import { getStudentSubjects } from '../../services/subjectService';
-import { getCurrentLabSession, getClassSchedule } from '../../services/timetableService'; // <--- NEW IMPORTS
+import { getCurrentLabSession, getClassSchedule } from '../../services/timetableService';
 import { Link } from 'react-router-dom';
 import CheckInModal from '../attendance/CheckInModal';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
@@ -77,9 +77,11 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
   const [pendingTasks, setPendingTasks] = useState<Task[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
 
-  // --- NEW TIMETABLE STATE ---
+  // --- TIMETABLE & TIMER STATE ---
   const [activeSession, setActiveSession] = useState<TimeTableSlot | null>(null);
   const [nextClass, setNextClass] = useState<TimeTableSlot | null>(null);
+  const [countdown, setCountdown] = useState<string | null>(null);
+  const [canCheckIn, setCanCheckIn] = useState(false);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -127,33 +129,28 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         console.error("Error fetching subjects", error);
       }
 
-      // 5. --- NEW: TIMETABLE INTEGRATION ---
+      // 5. --- TIMETABLE INTEGRATION ---
       try {
-        // Fallback: If user.course is missing, default to 'BCA' (or handle gracefully)
-        const studentCourse = user.course || 'BCA';
-        const studentSemester = user.semester || '';
+        const studentCourse = user.course || user.department || 'BCA';
+        const studentSemester = user.semester || 'S1';
 
-        if (studentSemester) {
-          // A. Check for ACTIVE class right now
-          const current = await getCurrentLabSession(studentCourse, studentSemester);
-          setActiveSession(current);
+        // A. Get "Active" session (Note: This might be 15 mins early due to buffer)
+        const current = await getCurrentLabSession(studentCourse, studentSemester);
+        setActiveSession(current);
 
-          // B. Find NEXT class today
-          const allSlots = await getClassSchedule(studentCourse, studentSemester);
-          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-          const todayName = days[new Date().getDay()];
+        // B. Find NEXT class today
+        const allSlots = await getClassSchedule(studentCourse, studentSemester);
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const todayName = days[new Date().getDay()];
+        const todaySlots = allSlots.filter(s => s.dayOfWeek === todayName);
 
-          // Filter for today's classes
-          const todaySlots = allSlots.filter(s => s.dayOfWeek === todayName);
+        const nowVal = new Date().getHours() * 60 + new Date().getMinutes();
+        const next = todaySlots.find(s => {
+          const [h, m] = s.startTime.split(':').map(Number);
+          return (h * 60 + m) > nowVal;
+        });
+        setNextClass(next || null);
 
-          // Find upcoming class
-          const nowVal = new Date().getHours() * 60 + new Date().getMinutes();
-          const next = todaySlots.find(s => {
-            const [h, m] = s.startTime.split(':').map(Number);
-            return (h * 60 + m) > nowVal;
-          });
-          setNextClass(next || null);
-        }
       } catch (error) {
         console.error("Timetable Error:", error);
       }
@@ -161,16 +158,75 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
     fetchDashboardData();
 
-  }, [user.id, refreshTrigger, user.semester, user.course]);
+  }, [user.id, refreshTrigger, user.semester, user.course, user.department]);
 
+  // --- COUNTDOWN TIMER EFFECT ---
+  useEffect(() => {
+    if (!activeSession) {
+      setCountdown(null);
+      setCanCheckIn(false);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const [startH, startM] = activeSession.startTime.split(':').map(Number);
+
+      const startTime = new Date();
+      startTime.setHours(startH, startM, 0, 0);
+
+      const diff = startTime.getTime() - now.getTime();
+
+      if (diff <= 0) {
+        // Time reached! Enable button
+        setCountdown(null);
+        setCanCheckIn(true);
+      } else {
+        // Waiting... Show Countdown
+        setCanCheckIn(false);
+        const minutes = Math.floor((diff / 1000 / 60) % 60);
+        const seconds = Math.floor((diff / 1000) % 60);
+        setCountdown(`${minutes}m ${seconds}s`);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeSession]);
+
+  // --- CHECKOUT LOGIC WITH EARLY LEAVE DETECTION ---
   const handleToggleAttendance = async () => {
     if (isCheckedIn) {
       setProcessing(true);
       try {
-        await checkOutStudent(user.id);
+        let finalStatus: 'COMPLETED' | 'EARLY_LEAVE' = 'COMPLETED';
+
+        // Check if leaving early
+        if (activeSession) {
+          const now = new Date();
+          const [endH, endM] = activeSession.endTime.split(':').map(Number);
+          const endTime = new Date();
+          endTime.setHours(endH, endM, 0, 0);
+
+          const diffMinutes = (endTime.getTime() - now.getTime()) / 1000 / 60;
+
+          // If leaving more than 5 minutes early
+          if (diffMinutes > 5) {
+            finalStatus = 'EARLY_LEAVE';
+            if (!window.confirm(`Class ends in ${Math.round(diffMinutes)} mins. Checking out now will be marked as EARLY LEAVE. Continue?`)) {
+              setProcessing(false);
+              return;
+            }
+          }
+        }
+
+        // Pass specific status to checkOutStudent (Requires updating attendanceService signature)
+        // @ts-ignore - Assuming you updated service to accept status, or just pass to activity
+        await checkOutStudent(user.id, finalStatus);
+
         await submitActivity(user, 'checkout', {
           recordId: currentRecord?.id,
-          duration: '2h'
+          duration: '2h',
+          status: finalStatus // Log specific status
         });
 
         setIsCheckedIn(false);
@@ -225,30 +281,34 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
       <div className="bg-gradient-to-r from-indigo-600 to-blue-500 dark:from-indigo-700 dark:to-blue-800 rounded-2xl p-8 text-white shadow-lg relative overflow-hidden">
         <div className="relative z-10">
           <h1 className="text-3xl font-bold mb-1">Welcome, {user.name.split(' ')[0]}</h1>
-          <p className="opacity-90 text-sm">You have <span className="font-bold">{pendingTasks.length} pending tasks</span> today.</p>
+          <p className="opacity-90 text-sm">
+            <span className="font-bold">{user.course || 'Course'} - {user.semester || 'Sem'}</span> • You have {pendingTasks.length} pending tasks.
+          </p>
         </div>
         <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 transform skew-x-12"></div>
       </div>
 
-      {/* --- ACTIVE CLASS / CHECK IN CARD (UPDATED) --- */}
+      {/* --- ACTIVE CLASS / CHECK IN CARD --- */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 transition-colors">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="w-14 h-14 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded-xl flex items-center justify-center text-2xl">
+            <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-2xl ${activeSession ? 'bg-green-100 text-green-600 dark:bg-green-900/30' : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50'}`}>
               <i className="fa-solid fa-computer"></i>
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                {isCheckedIn ? 'Session Active' : (activeSession ? 'Class in Progress' : 'Ready for Lab?')}
+                {isCheckedIn ? 'Session Active' : (activeSession ? 'Class Scheduled' : 'No Class Right Now')}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {isCheckedIn && currentRecord
                   ? `Checked in at ${new Date(currentRecord.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                   : activeSession
-                    ? `HAPPENING NOW: ${activeSession.subjectName} in ${activeSession.labName}`
+                    ? canCheckIn
+                      ? `HAPPENING NOW: ${activeSession.subjectName}`
+                      : `UPCOMING: ${activeSession.subjectName} (${activeSession.startTime})`
                     : nextClass
-                      ? `Next: ${nextClass.subjectName} at ${nextClass.startTime}`
-                      : 'No upcoming classes today.'
+                      ? `Up Next: ${nextClass.subjectName} at ${nextClass.startTime}`
+                      : 'No more classes scheduled for today.'
                 }
               </p>
             </div>
@@ -256,18 +316,22 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
           <button
             onClick={handleToggleAttendance}
-            // Disable if user is NOT checked in AND there is NO active session
-            disabled={processing || (!isCheckedIn && !activeSession)}
+            // Disabled Logic:
+            // 1. Processing
+            // 2. OR (Not Checked In AND (No Session OR Session hasn't started yet))
+            disabled={processing || (!isCheckedIn && (!activeSession || !canCheckIn))}
             className={`w-full md:w-64 py-3.5 rounded-xl font-bold text-white shadow-md transition-all flex items-center justify-center gap-2 text-lg transform hover:scale-[1.02] ${processing ? 'bg-slate-400 dark:bg-slate-600 cursor-wait' :
-              isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' :
-                activeSession ? 'bg-green-600 hover:bg-green-700 shadow-green-500/20 animate-pulse' :
-                  'bg-slate-300 dark:bg-slate-700 cursor-not-allowed text-slate-500'
+                isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' :
+                  (activeSession && canCheckIn) ? 'bg-green-600 hover:bg-green-700 shadow-green-500/20 animate-pulse' :
+                    'bg-slate-300 dark:bg-slate-700 cursor-not-allowed text-slate-500'
               }`}
           >
             {processing ? (
               <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Processing...</>
             ) : isCheckedIn ? (
               <><i className="fa-solid fa-right-from-bracket"></i> Check Out</>
+            ) : countdown ? (
+              <><i className="fa-regular fa-clock"></i> Starts in {countdown}</>
             ) : (
               <><i className="fa-solid fa-right-to-bracket"></i> Check In Now</>
             )}

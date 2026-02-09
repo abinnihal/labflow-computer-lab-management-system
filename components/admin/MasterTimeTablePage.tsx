@@ -5,13 +5,14 @@ import { Lab, Subject, TimeTableSlot, User } from '../../types';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+//days recurring 
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const TIMES = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'];
-
 const COURSES = ['BCA', 'B.Sc Computer Science', 'B.Tech CSE', 'MCA', 'M.Sc Computer Science'];
 
 const MasterTimeTablePage: React.FC = () => {
-    const [selectedCourse, setSelectedCourse] = useState('BCA'); // Default
+    // State for Filters
+    const [selectedCourse, setSelectedCourse] = useState('BCA');
     const [selectedSemester, setSelectedSemester] = useState('S1');
 
     const [schedule, setSchedule] = useState<TimeTableSlot[]>([]);
@@ -47,11 +48,12 @@ const MasterTimeTablePage: React.FC = () => {
 
     useEffect(() => {
         fetchSchedule();
-    }, [selectedCourse, selectedSemester]); // Refresh when Course OR Sem changes
+    }, [selectedCourse, selectedSemester]);
 
     const fetchSchedule = async () => {
         setLoading(true);
         try {
+            // Fetch schedule specific to Course + Semester
             const data = await getClassSchedule(selectedCourse, selectedSemester);
             setSchedule(data);
         } catch (error) {
@@ -78,7 +80,7 @@ const MasterTimeTablePage: React.FC = () => {
                 subjectName: subject?.name || 'Unknown',
                 facultyName: faculty?.name || 'Unknown',
                 labName: lab?.name || 'Unknown',
-                course: selectedCourse,   // <--- Saving Course
+                course: selectedCourse, // <--- SAVING THE COURSE
                 semester: selectedSemester
             });
 
@@ -108,25 +110,23 @@ const MasterTimeTablePage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {/* COURSE SELECTOR */}
                     <div className="flex flex-col">
                         <label className="text-[10px] font-bold text-slate-500 uppercase">Course</label>
                         <select
                             value={selectedCourse}
                             onChange={e => setSelectedCourse(e.target.value)}
-                            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-white font-bold focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
                             {COURSES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                     </div>
 
-                    {/* SEMESTER SELECTOR */}
                     <div className="flex flex-col">
                         <label className="text-[10px] font-bold text-slate-500 uppercase">Semester</label>
                         <select
                             value={selectedSemester}
                             onChange={e => setSelectedSemester(e.target.value)}
-                            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-white font-bold focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                            className="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
                             {['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'].map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
@@ -192,7 +192,6 @@ const MasterTimeTablePage: React.FC = () => {
                         <h3 className="font-bold text-xl text-slate-800 dark:text-white mb-4">Add Class for {selectedCourse} {selectedSemester}</h3>
 
                         <div className="space-y-4">
-                            {/* Subject Selector */}
                             <div>
                                 <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Subject</label>
                                 <select
@@ -200,14 +199,12 @@ const MasterTimeTablePage: React.FC = () => {
                                     className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                                 >
                                     <option value="">Select Subject</option>
-                                    {/* Filter subjects by current semester if your subject data has semester info */}
                                     {subjects.map(s => (
                                         <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                                     ))}
                                 </select>
                             </div>
 
-                            {/* Faculty Selector */}
                             <div>
                                 <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Faculty</label>
                                 <select
@@ -219,7 +216,6 @@ const MasterTimeTablePage: React.FC = () => {
                                 </select>
                             </div>
 
-                            {/* Lab Selector */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Lab Venue</label>

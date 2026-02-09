@@ -95,7 +95,7 @@ export const checkInStudent = async (
   user: User,
   labId: string,
   systemNumber: number,
-  proofUrl?: string // <--- New Parameter
+  proofUrl?: string
 ): Promise<AttendanceLog> => {
 
   const newLog = {
@@ -107,10 +107,9 @@ export const checkInStudent = async (
     status: 'PRESENT',
     date: new Date().toLocaleDateString(),
     labName: labId,
-    proofUrl: proofUrl || '' // <--- Saving to Database
+    proofUrl: proofUrl || ''
   };
 
-  // Cast to 'any' briefly to avoid type conflict if types.ts isn't fully refreshed by VS Code yet
   const docRef = await addDoc(collection(db, ATTENDANCE_COLLECTION), newLog);
   return { id: docRef.id, ...newLog } as any as AttendanceLog;
 };
@@ -138,19 +137,25 @@ export const manualCheckIn = async (studentId: string, labId: string, status: 'P
   await addDoc(collection(db, ATTENDANCE_COLLECTION), newLog);
 };
 
-export const checkOutStudent = async (studentId: string): Promise<void> => {
+// --- UPDATED CHECKOUT FUNCTION ---
+export const checkOutStudent = async (
+  studentId: string,
+  status: 'COMPLETED' | 'EARLY_LEAVE' = 'COMPLETED' // Default to COMPLETED
+): Promise<void> => {
+
   const q = query(
     collection(db, ATTENDANCE_COLLECTION),
     where('studentId', '==', studentId),
-    where('status', 'in', ['PRESENT', 'LATE'])
+    where('status', 'in', ['PRESENT', 'LATE']) // Only close active sessions
   );
+
   const snapshot = await getDocs(q);
   const activeDoc = snapshot.docs.find(d => !d.data().checkOutTime);
 
   if (activeDoc) {
     await updateDoc(doc(db, ATTENDANCE_COLLECTION, activeDoc.id), {
       checkOutTime: new Date().toISOString(),
-      status: 'COMPLETED'
+      status: status // <--- Saves 'EARLY_LEAVE' or 'COMPLETED'
     });
   }
 };
@@ -197,9 +202,6 @@ export const submitActivity = async (
 // NEW: Activity Fetcher for Faculty Dashboard
 export const getActivitiesForFaculty = async (department: string, managedSemesters: string[]): Promise<StudentActivity[]> => {
   try {
-    // 1. Fetch activities (filtering by department if possible, or fetch all recent)
-    // Note: Firestore 'in' queries are limited. We'll fetch by department if indexed, or all recent.
-    // For now, let's fetch recent 50 activities and filter in memory to be safe.
     const q = query(
       collection(db, ACTIVITIES_COLLECTION),
       orderBy('timestamp', 'desc'),
@@ -209,11 +211,9 @@ export const getActivitiesForFaculty = async (department: string, managedSemeste
     const snapshot = await getDocs(q);
     const allActivities = snapshot.docs.map(mapDocToActivity);
 
-    // 2. Filter by Semester
+    // Filter by Semester
     return allActivities.filter(act =>
-      // Match Department (Relaxed check for demo)
       (act.department === department || !department) &&
-      // Match Semester
       (managedSemesters && managedSemesters.includes(act.semester))
     );
   } catch (error) {

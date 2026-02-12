@@ -4,7 +4,7 @@ import { getPendingUsersByRole, updateUserStatus } from '../../services/userServ
 import TerminalLoader from '../ui/TerminalLoader';
 
 interface Props {
-    targetRole: UserRole;
+    targetRole: UserRole | 'ALL';
     department?: string;
     managedSemesters?: string[];
 }
@@ -18,13 +18,24 @@ const ApprovalList: React.FC<Props> = ({ targetRole, department, managedSemester
 
     useEffect(() => {
         fetchData();
-    }, [targetRole, department, managedSemesters]);
+    }, [targetRole, department]);
 
-    // FIX: Converted to Async/Await to handle Database Promise
     const fetchData = async () => {
         setLoading(true);
         try {
-            const data = await getPendingUsersByRole(targetRole, department, managedSemesters);
+            let data: User[] = [];
+
+            if (targetRole === 'ALL') {
+                const faculty = await getPendingUsersByRole(UserRole.FACULTY);
+                const students = await getPendingUsersByRole(UserRole.STUDENT);
+                data = [...faculty, ...students];
+            } else {
+                data = await getPendingUsersByRole(targetRole, department, managedSemesters);
+            }
+
+            // Sort by newest first
+            data.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
             setUsers(data || []);
         } catch (error) {
             console.error("Failed to load approvals", error);
@@ -62,7 +73,7 @@ const ApprovalList: React.FC<Props> = ({ targetRole, department, managedSemester
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
                 <h3 className="font-bold text-slate-800 dark:text-white">
-                    Pending {targetRole === UserRole.FACULTY ? 'Faculty' : 'Student'} Registrations {department && `(${department})`}
+                    Pending Approvals
                 </h3>
                 <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs font-bold px-2 py-1 rounded-full">
                     {users.length} Pending
@@ -91,26 +102,25 @@ const ApprovalList: React.FC<Props> = ({ targetRole, department, managedSemester
                                 onClick={() => setExpandedId(expandedId === user.id ? null : user.id)}
                             >
                                 <div className="flex items-center gap-4">
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${targetRole === UserRole.FACULTY ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400' : 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'}`}>
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${user.role === UserRole.FACULTY ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400' : 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'}`}>
                                         {user.name.charAt(0)}
                                     </div>
                                     <div>
-                                        <h4 className="font-bold text-slate-800 dark:text-white text-sm">{user.name}</h4>
+                                        <h4 className="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-2">
+                                            {user.name}
+                                            <span className={`text-[10px] px-1.5 rounded uppercase font-bold ${user.role === UserRole.FACULTY ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                                {user.role}
+                                            </span>
+                                        </h4>
                                         <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
                                     </div>
                                 </div>
 
                                 <div className="hidden sm:flex items-center gap-6">
                                     <div className="text-right">
-                                        <p className="text-[10px] text-slate-400 uppercase font-bold">External ID</p>
+                                        <p className="text-[10px] text-slate-400 uppercase font-bold">Dept/Course</p>
                                         <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                                            {user.studentId || user.facultyId || 'N/A'}
-                                        </p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-[10px] text-slate-400 uppercase font-bold">Date</p>
-                                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                                            {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
+                                            {user.role === UserRole.FACULTY ? user.department : `${user.course} - ${user.semester}`}
                                         </p>
                                     </div>
                                 </div>
@@ -130,16 +140,22 @@ const ApprovalList: React.FC<Props> = ({ targetRole, department, managedSemester
                                                 <span className="text-slate-500 dark:text-slate-400">Phone:</span>
                                                 <span className="font-medium text-slate-800 dark:text-slate-200">{user.phone || 'N/A'}</span>
 
-                                                <span className="text-slate-500 dark:text-slate-400">Department:</span>
-                                                <span className="font-medium text-slate-800 dark:text-slate-200">{user.department || 'N/A'}</span>
+                                                <span className="text-slate-500 dark:text-slate-400">External ID:</span>
+                                                <span className="font-medium text-slate-800 dark:text-slate-200">{user.studentId || user.facultyId || 'N/A'}</span>
 
-                                                {targetRole === UserRole.STUDENT && (
+                                                {user.role === UserRole.STUDENT && (
                                                     <>
                                                         <span className="text-slate-500 dark:text-slate-400">Course:</span>
                                                         <span className="font-medium text-slate-800 dark:text-slate-200">{user.course || 'N/A'}</span>
 
                                                         <span className="text-slate-500 dark:text-slate-400">Semester:</span>
                                                         <span className="font-medium text-slate-800 dark:text-slate-200">{user.semester || 'N/A'}</span>
+                                                    </>
+                                                )}
+                                                {user.role === UserRole.FACULTY && (
+                                                    <>
+                                                        <span className="text-slate-500 dark:text-slate-400">Department:</span>
+                                                        <span className="font-medium text-slate-800 dark:text-slate-200">{user.department || 'N/A'}</span>
                                                     </>
                                                 )}
                                             </div>

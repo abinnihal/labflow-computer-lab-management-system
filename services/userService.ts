@@ -14,7 +14,6 @@ import { User, UserRole, PermissionLevel } from '../types';
 import { sendNotification } from './notificationService';
 import {
   loginWithEmail,
-  // Import the NEW register function (aliased to avoid conflict)
   registerUser as authRegisterUser
 } from './auth';
 
@@ -27,8 +26,7 @@ const mapDocToUser = (docId: string, data: any): User => {
     id: docId,
     name: data.name || '',
     email: data.email || '',
-    // CRITICAL FIX: Convert DB lowercase "admin" -> App uppercase "ADMIN"
-    role: (data.role as string)?.toUpperCase() as UserRole,
+    role: (data.role as string)?.toUpperCase() as UserRole, // Normalize to Uppercase for App
     status: data.status,
     department: data.department,
     permissions: data.permissions || {},
@@ -37,7 +35,8 @@ const mapDocToUser = (docId: string, data: any): User => {
     managedSemesters: data.managedSemesters,
     phone: data.phone,
     studentId: data.studentId,
-    facultyId: data.facultyId
+    facultyId: data.facultyId,
+    course: data.course
   } as User;
 };
 
@@ -56,31 +55,29 @@ export const getAllUsers = async (): Promise<User[]> => {
 
 /**
  * Fetch pending users based on Role and Department
+ * FIX APPLIED: Checks for both "student" AND "STUDENT" to avoid case-sensitivity bugs.
  */
 export const getPendingUsersByRole = async (role: UserRole, department?: string, managedSemesters?: string[]): Promise<User[]> => {
   try {
-    // CRITICAL FIX: Query Firestore using lowercase "student"/"faculty" if that is how you store it
-    // Or uppercase if you switched. Assuming lowercase based on previous files:
-    const dbRole = role.toLowerCase();
-
-    // Note: If your DB uses Uppercase 'STUDENT', change above line to role.toUpperCase()
+    // FIX: Look for both lowercase and uppercase versions of the role
+    // This catches 'student' (from imports) and 'STUDENT' (from registration)
+    const validRoles = [role.toLowerCase(), role.toUpperCase()];
 
     const q = query(
       collection(db, USERS_COLLECTION),
-      where("role", "==", dbRole),
+      where("role", "in", validRoles), // <--- Uses 'in' operator to match either
       where("status", "==", "PENDING")
     );
 
     const querySnapshot = await getDocs(q);
     let users = querySnapshot.docs.map(doc => mapDocToUser(doc.id, doc.data()));
 
-    // Client-side filtering for Department & Semester
+    // Client-side filtering for Department & Semester (Optional refinement)
     if (role === UserRole.STUDENT) {
       if (department) {
         users = users.filter(u => u.department === department);
       }
       if (managedSemesters && managedSemesters.length > 0) {
-        // If student has no semester, they might not show up.
         users = users.filter(u => u.semester && managedSemesters.includes(u.semester));
       }
     }
@@ -100,16 +97,11 @@ export const authenticateUser = async (
   password: string
 ): Promise<User | null> => {
   try {
-    // 1. Firebase Auth Login
     const fbUser = await loginWithEmail(email, password);
-
-    // 2. Fetch User Profile from Firestore
     const userDocRef = doc(db, USERS_COLLECTION, fbUser.uid);
     const userDoc = await getDoc(userDocRef);
 
     if (!userDoc.exists()) return null;
-
-    // 3. Return mapped User object
     return mapDocToUser(fbUser.uid, userDoc.data());
   } catch (error) {
     console.error("Authentication failed:", error);
@@ -118,35 +110,30 @@ export const authenticateUser = async (
 };
 
 /**
- * Register User (Wrapper for auth.ts service)
+ * Register User
  */
 export const registerUser = async (
   user: Omit<User, 'id' | 'status'>,
   password: string
 ): Promise<User | null> => {
   try {
-    // Call the NEW authRegisterUser from auth.ts
-    // It handles Firestore creation automatically now.
-
-    // Convert string role to Enum if necessary, though User type implies it's already Enum
     const roleEnum = user.role === UserRole.FACULTY ? UserRole.FACULTY : UserRole.STUDENT;
 
     const resultData = await authRegisterUser({
       email: user.email,
       name: user.name,
-      role: roleEnum, // Pass Enum, not string
+      role: roleEnum,
       phone: user.phone,
       department: user.department,
       semester: user.semester,
-      studentId: user.studentId
-      // add other fields if needed
+      studentId: user.studentId,
+      course: user.course // Ensure course is saved
     }, password);
 
-    // Map the result back to our User type
     return {
       id: resultData.uid,
-      ...user, // Spread original data
-      status: 'APPROVED' // authRegisterUser defaults to APPROVED
+      ...user,
+      status: 'APPROVED'
     } as User;
 
   } catch (error) {
@@ -155,15 +142,11 @@ export const registerUser = async (
   }
 };
 
-/**
- * Update User Status (Approve/Reject)
- */
 export const updateUserStatus = async (userId: string, status: 'APPROVED' | 'REJECTED' | 'DEACTIVATED' | 'PENDING'): Promise<void> => {
   try {
     const userRef = doc(db, USERS_COLLECTION, userId);
     await updateDoc(userRef, { status });
 
-    // Send Notification
     if (status === 'APPROVED' || status === 'REJECTED') {
       const type = status === 'APPROVED' ? 'INFO' : 'ALERT';
       const msg = status === 'APPROVED'
@@ -181,9 +164,6 @@ export const resetUserPassword = async (userId: string): Promise<string> => {
   return "Please use the 'Forgot Password' link on the login page.";
 };
 
-/**
- * Update User Details
- */
 export const updateUser = async (userId: string, updates: Partial<User>): Promise<User | null> => {
   try {
     const userRef = doc(db, USERS_COLLECTION, userId);
@@ -216,23 +196,18 @@ export const deleteUser = async (userId: string): Promise<void> => {
   }
 };
 
-/**
- * Batch Import Users
- */
 export const importUsersFromCSV = async (csvContent: string): Promise<number> => {
   const lines = csvContent.split('\n');
   let count = 0;
   const batch = writeBatch(db);
 
   lines.forEach((line, idx) => {
-    if (idx === 0) return; // Skip header
+    if (idx === 0) return;
     const [name, email, roleStr, dept] = line.split(',');
 
     if (name && email) {
       const newId = `imported-${Date.now()}-${idx}`;
       const userRef = doc(db, USERS_COLLECTION, newId);
-
-      // CRITICAL: Save role as lowercase to match DB convention
       const dbRole = roleStr?.trim().toUpperCase() === 'FACULTY' ? 'faculty' : 'student';
 
       batch.set(userRef, {

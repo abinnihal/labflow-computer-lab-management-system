@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { User, AttendanceLog, UserRole } from '../../types';
+import { User, UserRole } from '../../types';
 import { getAttendanceLogs, updateAttendanceRecord, deleteAttendanceRecord } from '../../services/attendanceService';
 import { sendNotification } from '../../services/notificationService';
 import { getAllUsers, updateUser, updateUserStatus, resetUserPassword, deleteUser } from '../../services/userService';
-import { doc, getDoc } from 'firebase/firestore'; // Added imports
-import { db } from '../../services/firebase'; // Added imports
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 interface Props {
   user: User;
@@ -72,23 +72,25 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
 
       let myStudents = allUsers.filter(u => u.role === UserRole.STUDENT);
 
-      // 3. SCOPING LOGIC
+      // 3. SCOPING LOGIC (Context Priority)
       if (user.role === UserRole.FACULTY) {
-        // A. First filter by Managed Semesters (General Scope)
-        if (user.managedSemesters && user.managedSemesters.length > 0) {
-          myStudents = myStudents.filter(s => s.semester && user.managedSemesters?.includes(s.semester));
-        }
-
-        // B. Then filter by Context (Specific Class Dashboard)
         if (contextFilter) {
+          // Case A: Inside Class Dashboard -> Trust Context (Ignore managedSemesters)
           myStudents = myStudents.filter(s =>
             s.semester === contextFilter.semester &&
             (!contextFilter.course || s.course === contextFilter.course)
           );
+        } else {
+          // Case B: Global Dashboard -> Use Managed Semesters
+          if (user.managedSemesters && user.managedSemesters.length > 0) {
+            myStudents = myStudents.filter(s => s.semester && user.managedSemesters?.includes(s.semester));
+          } else {
+            myStudents = []; // Hide if no assignments
+          }
         }
       }
 
-      // Admin sees all (but could be filtered by context if Admin enters a class dashboard)
+      // Admin Logic
       if (user.role === UserRole.ADMIN && contextFilter) {
         myStudents = myStudents.filter(s =>
           s.semester === contextFilter.semester &&
@@ -96,7 +98,7 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
         );
       }
 
-      // 4. Filter Logs based on Visible Students
+      // 4. Filter Logs
       const myStudentIds = myStudents.map(s => s.id);
       const filteredLogs = attendanceData.filter((l: any) => myStudentIds.includes(l.studentId));
 
@@ -106,7 +108,7 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
     } catch (error) {
       console.error("Failed to load student data", error);
     } finally {
-      setLoading(false);
+      setLoading(false); // CRITICAL: Ensure this runs to stop "Loading..."
     }
   };
 
@@ -115,9 +117,7 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // ... (Keep existing handlers: handleSelectStudent, handleSelectAll, handleSendNotification, etc.) ...
-  // [Copy-paste all your existing handler functions here unchanged]
-
+  // --- Handlers ---
   const handleSelectStudent = (id: string) => {
     if (selectedStudents.includes(id)) {
       setSelectedStudents(selectedStudents.filter(s => s !== id));

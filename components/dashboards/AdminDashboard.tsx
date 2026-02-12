@@ -6,7 +6,7 @@ import { getAllLabs } from '../../services/labService';
 import { getPendingFeedbackCount } from '../../services/maintenanceService';
 import ApprovalList from '../approvals/ApprovalList';
 import { getPendingUsersByRole } from '../../services/userService';
-import MasterTimeTablePage from '../admin/MasterTimeTablePage'; // <--- IMPORT THIS
+import MasterTimeTablePage from '../admin/MasterTimeTablePage';
 
 interface Props {
    user: User;
@@ -14,7 +14,6 @@ interface Props {
 
 const AdminDashboard: React.FC<Props> = ({ user }) => {
    const [activeStudents, setActiveStudents] = useState(0);
-   // Updated State type to include TIMETABLE
    const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'APPROVALS' | 'TIMETABLE'>('OVERVIEW');
    const [pendingCount, setPendingCount] = useState(0);
 
@@ -26,7 +25,6 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
    const [loading, setLoading] = useState(true);
 
    useEffect(() => {
-      // Optimization: Don't fetch dashboard stats if looking at Timetable
       if (activeTab === 'TIMETABLE') return;
 
       const fetchData = async () => {
@@ -36,9 +34,10 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
             const logs = await getAttendanceLogs();
             setActiveStudents(logs.filter(l => l.status === 'PRESENT').length);
 
-            // 2. Fetch Pending Faculty
+            // 2. Fetch ALL Pending Users (Faculty + Students)
             const pendingFaculty = await getPendingUsersByRole(UserRole.FACULTY);
-            setPendingCount(pendingFaculty.length);
+            const pendingStudents = await getPendingUsersByRole(UserRole.STUDENT);
+            setPendingCount(pendingFaculty.length + pendingStudents.length);
 
             // 3. Fetch Labs & Calculate Usage
             const labs = await getAllLabs();
@@ -93,7 +92,6 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
                   Overview
                </button>
 
-               {/* --- NEW TIMETABLE TAB --- */}
                <button
                   onClick={() => setActiveTab('TIMETABLE')}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'TIMETABLE' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
@@ -119,7 +117,8 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
          {activeTab === 'TIMETABLE' ? (
             <MasterTimeTablePage />
          ) : activeTab === 'APPROVALS' ? (
-            <ApprovalList targetRole={UserRole.FACULTY} />
+            // Passing 'ALL' tells it to fetch both roles
+            <ApprovalList targetRole="ALL" />
          ) : (
             <>
                {loading ? (
@@ -155,7 +154,7 @@ const AdminDashboard: React.FC<Props> = ({ user }) => {
                            <div className="flex justify-between">
                               <div>
                                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Peak Hour</p>
-                                 <h3 className="text-2xl font-bold text-slate-800 dark:text-white mt-1">-</h3>
+                                 <h3 className="text-2xl font-bold text-slate-800 dark:text-white mt-1">10 AM</h3>
                               </div>
                            </div>
                         </div>

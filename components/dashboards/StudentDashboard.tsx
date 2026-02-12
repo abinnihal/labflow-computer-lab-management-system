@@ -77,11 +77,10 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
   const [pendingTasks, setPendingTasks] = useState<Task[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
 
-  // --- TIMETABLE & TIMER STATE ---
+  // --- NEW TIMETABLE STATE ---
   const [activeSession, setActiveSession] = useState<TimeTableSlot | null>(null);
   const [nextClass, setNextClass] = useState<TimeTableSlot | null>(null);
-  const [countdown, setCountdown] = useState<string | null>(null);
-  const [canCheckIn, setCanCheckIn] = useState(false);
+  const [isAdHocCheckIn, setIsAdHocCheckIn] = useState(false); // Track if checking in without class
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -90,7 +89,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
       setIsCheckedIn(status.isCheckedIn);
       setCurrentRecord(status.currentRecord);
 
-      // 2. Attendance Avg
+      // 2. Attendance Avg (Filtered)
       try {
         const allBookings = await getAllBookings();
         const now = new Date();
@@ -99,8 +98,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         });
 
         const logs = await getLogsByStudent(user.id);
-        const completed = logs.filter(l => l.status === 'COMPLETED' || l.status === 'PRESENT').length;
-        const totalSessions = Math.max(pastBookings.length, 1);
+
+        // FIX: Exclude Ad-Hoc sessions from attendance stats
+        const classLogs = logs.filter(l => !l.isAdHoc);
+
+        const completed = classLogs.filter(l => l.status === 'COMPLETED' || l.status === 'PRESENT' || l.status === 'EARLY_LEAVE').length;
+        const totalSessions = Math.max(pastBookings.length, 1); // Ideally use timetable count
 
         setAttendanceAvg(Math.min(100, Math.round((completed / totalSessions) * 100)));
       } catch (error) {
@@ -129,28 +132,66 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         console.error("Error fetching subjects", error);
       }
 
-      // 5. --- TIMETABLE INTEGRATION ---
+      // 5. --- TIMETABLE & BOOKING INTEGRATION ---
       try {
-        const studentCourse = user.course || user.department || 'BCA';
-        const studentSemester = user.semester || 'S1';
+        const studentCourse = user.course || 'BCA';
+        const studentSemester = user.semester || '';
 
-        // A. Get "Active" session (Note: This might be 15 mins early due to buffer)
-        const current = await getCurrentLabSession(studentCourse, studentSemester);
-        setActiveSession(current);
+        if (studentSemester) {
+          // A. Check Master Timetable
+          let current: TimeTableSlot | null = await getCurrentLabSession(studentCourse, studentSemester);
 
-        // B. Find NEXT class today
-        const allSlots = await getClassSchedule(studentCourse, studentSemester);
-        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const todayName = days[new Date().getDay()];
-        const todaySlots = allSlots.filter(s => s.dayOfWeek === todayName);
+          // B. FIX: Check Active Bookings (Faculty or Student bookings)
+          if (!current) {
+            const allBookings = await getAllBookings();
+            const now = new Date();
+            const activeBooking = allBookings.find(b => {
+              const start = new Date(b.startTime);
+              const end = new Date(b.endTime);
+              // Check time overlap
+              const isTimeActive = now >= start && now < end;
+              // Check ownership (Course match OR User match)
+              // This logic allows students to see bookings for their entire batch
+              const isForBatch = b.course === studentCourse && b.semester === studentSemester;
+              const isForMe = b.userId === user.id;
 
-        const nowVal = new Date().getHours() * 60 + new Date().getMinutes();
-        const next = todaySlots.find(s => {
-          const [h, m] = s.startTime.split(':').map(Number);
-          return (h * 60 + m) > nowVal;
-        });
-        setNextClass(next || null);
+              return isTimeActive && (isForBatch || isForMe) && b.status === 'APPROVED';
+            });
 
+            if (activeBooking) {
+              // Convert Booking to TimeTableSlot format for UI consistency
+              current = {
+                id: activeBooking.id,
+                subjectName: activeBooking.subject,
+                labName: activeBooking.labId === 'l1' ? 'Programming Lab' : activeBooking.labId === 'l2' ? 'AI Lab' : 'Network Lab', // Mock map
+                startTime: new Date(activeBooking.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+                endTime: new Date(activeBooking.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+                course: studentCourse,
+                semester: studentSemester,
+                dayOfWeek: 'Monday', // Dummy
+                subjectId: 'booking',
+                facultyId: activeBooking.userId,
+                facultyName: activeBooking.userName,
+                labId: activeBooking.labId || 'l1'
+              };
+            }
+          }
+
+          setActiveSession(current);
+
+          // C. Find NEXT class (Master Timetable only for now)
+          const allSlots = await getClassSchedule(studentCourse, studentSemester);
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const todayName = days[new Date().getDay()];
+          const todaySlots = allSlots.filter(s => s.dayOfWeek === todayName);
+
+          const nowVal = new Date().getHours() * 60 + new Date().getMinutes();
+          const next = todaySlots.find(s => {
+            const [h, m] = s.startTime.split(':').map(Number);
+            return (h * 60 + m) > nowVal;
+          });
+          setNextClass(next || null);
+        }
       } catch (error) {
         console.error("Timetable Error:", error);
       }
@@ -158,75 +199,17 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
     fetchDashboardData();
 
-  }, [user.id, refreshTrigger, user.semester, user.course, user.department]);
+  }, [user.id, refreshTrigger, user.semester, user.course]);
 
-  // --- COUNTDOWN TIMER EFFECT ---
-  useEffect(() => {
-    if (!activeSession) {
-      setCountdown(null);
-      setCanCheckIn(false);
-      return;
-    }
-
-    const timer = setInterval(() => {
-      const now = new Date();
-      const [startH, startM] = activeSession.startTime.split(':').map(Number);
-
-      const startTime = new Date();
-      startTime.setHours(startH, startM, 0, 0);
-
-      const diff = startTime.getTime() - now.getTime();
-
-      if (diff <= 0) {
-        // Time reached! Enable button
-        setCountdown(null);
-        setCanCheckIn(true);
-      } else {
-        // Waiting... Show Countdown
-        setCanCheckIn(false);
-        const minutes = Math.floor((diff / 1000 / 60) % 60);
-        const seconds = Math.floor((diff / 1000) % 60);
-        setCountdown(`${minutes}m ${seconds}s`);
-      }
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [activeSession]);
-
-  // --- CHECKOUT LOGIC WITH EARLY LEAVE DETECTION ---
+  // --- UPDATED BUTTON LOGIC ---
   const handleToggleAttendance = async () => {
     if (isCheckedIn) {
       setProcessing(true);
       try {
-        let finalStatus: 'COMPLETED' | 'EARLY_LEAVE' = 'COMPLETED';
-
-        // Check if leaving early
-        if (activeSession) {
-          const now = new Date();
-          const [endH, endM] = activeSession.endTime.split(':').map(Number);
-          const endTime = new Date();
-          endTime.setHours(endH, endM, 0, 0);
-
-          const diffMinutes = (endTime.getTime() - now.getTime()) / 1000 / 60;
-
-          // If leaving more than 5 minutes early
-          if (diffMinutes > 5) {
-            finalStatus = 'EARLY_LEAVE';
-            if (!window.confirm(`Class ends in ${Math.round(diffMinutes)} mins. Checking out now will be marked as EARLY LEAVE. Continue?`)) {
-              setProcessing(false);
-              return;
-            }
-          }
-        }
-
-        // Pass specific status to checkOutStudent (Requires updating attendanceService signature)
-        // @ts-ignore - Assuming you updated service to accept status, or just pass to activity
-        await checkOutStudent(user.id, finalStatus);
-
+        await checkOutStudent(user.id);
         await submitActivity(user, 'checkout', {
           recordId: currentRecord?.id,
-          duration: '2h',
-          status: finalStatus // Log specific status
+          duration: '2h'
         });
 
         setIsCheckedIn(false);
@@ -238,15 +221,28 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         setProcessing(false);
       }
     } else {
-      setShowCheckInModal(true);
+      // Check In Logic
+      if (!activeSession) {
+        // Confirmation for Ad-Hoc
+        const confirmCheckIn = window.confirm("No active lab hour detected. Do you still want to check in for an extra session? (This will not count towards class attendance)");
+        if (confirmCheckIn) {
+          setIsAdHocCheckIn(true);
+          setShowCheckInModal(true);
+        }
+      } else {
+        // Normal Class Check-in
+        setIsAdHocCheckIn(false);
+        setShowCheckInModal(true);
+      }
     }
   };
 
-  const processCheckIn = async (labId: string, systemNumber: number, proofUrl: string) => {
+  const processCheckIn = async (labId: string, systemNumber: number, proofUrl: string, labName: string) => {
     setProcessing(true);
     setShowCheckInModal(false);
     try {
-      const record = await checkInStudent(user, labId, systemNumber, proofUrl);
+      // FIX: Pass labName and isAdHoc flag
+      const record = await checkInStudent(user, labId, systemNumber, proofUrl, labName, isAdHocCheckIn);
 
       await submitActivity(user, 'checkin', {
         labId,
@@ -277,38 +273,32 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
   return (
     <div className="space-y-6">
-      {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-indigo-600 to-blue-500 dark:from-indigo-700 dark:to-blue-800 rounded-2xl p-8 text-white shadow-lg relative overflow-hidden">
         <div className="relative z-10">
           <h1 className="text-3xl font-bold mb-1">Welcome, {user.name.split(' ')[0]}</h1>
-          <p className="opacity-90 text-sm">
-            <span className="font-bold">{user.course || 'Course'} - {user.semester || 'Sem'}</span> • You have {pendingTasks.length} pending tasks.
-          </p>
+          <p className="opacity-90 text-sm">You have <span className="font-bold">{pendingTasks.length} pending tasks</span> today.</p>
         </div>
         <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 transform skew-x-12"></div>
       </div>
 
-      {/* --- ACTIVE CLASS / CHECK IN CARD --- */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 transition-colors">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-2xl ${activeSession ? 'bg-green-100 text-green-600 dark:bg-green-900/30' : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50'}`}>
+            <div className="w-14 h-14 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded-xl flex items-center justify-center text-2xl">
               <i className="fa-solid fa-computer"></i>
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                {isCheckedIn ? 'Session Active' : (activeSession ? 'Class Scheduled' : 'No Class Right Now')}
+                {isCheckedIn ? 'Session Active' : (activeSession ? 'Class in Progress' : 'No Active Class')}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {isCheckedIn && currentRecord
                   ? `Checked in at ${new Date(currentRecord.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                   : activeSession
-                    ? canCheckIn
-                      ? `HAPPENING NOW: ${activeSession.subjectName}`
-                      : `UPCOMING: ${activeSession.subjectName} (${activeSession.startTime})`
+                    ? `HAPPENING NOW: ${activeSession.subjectName} in ${activeSession.labName}`
                     : nextClass
-                      ? `Up Next: ${nextClass.subjectName} at ${nextClass.startTime}`
-                      : 'No more classes scheduled for today.'
+                      ? `Next: ${nextClass.subjectName} at ${nextClass.startTime}`
+                      : 'Free access is available. You can check in manually.'
                 }
               </p>
             </div>
@@ -316,22 +306,17 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
           <button
             onClick={handleToggleAttendance}
-            // Disabled Logic:
-            // 1. Processing
-            // 2. OR (Not Checked In AND (No Session OR Session hasn't started yet))
-            disabled={processing || (!isCheckedIn && (!activeSession || !canCheckIn))}
+            disabled={processing}
             className={`w-full md:w-64 py-3.5 rounded-xl font-bold text-white shadow-md transition-all flex items-center justify-center gap-2 text-lg transform hover:scale-[1.02] ${processing ? 'bg-slate-400 dark:bg-slate-600 cursor-wait' :
-                isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' :
-                  (activeSession && canCheckIn) ? 'bg-green-600 hover:bg-green-700 shadow-green-500/20 animate-pulse' :
-                    'bg-slate-300 dark:bg-slate-700 cursor-not-allowed text-slate-500'
+              isCheckedIn ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' :
+                activeSession ? 'bg-green-600 hover:bg-green-700 shadow-green-500/20 animate-pulse' :
+                  'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
               }`}
           >
             {processing ? (
               <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Processing...</>
             ) : isCheckedIn ? (
               <><i className="fa-solid fa-right-from-bracket"></i> Check Out</>
-            ) : countdown ? (
-              <><i className="fa-regular fa-clock"></i> Starts in {countdown}</>
             ) : (
               <><i className="fa-solid fa-right-to-bracket"></i> Check In Now</>
             )}
@@ -342,17 +327,24 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
           <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 flex gap-6 text-sm">
             <div>
               <span className="text-slate-400 text-xs uppercase font-bold">Lab</span>
-              <p className="font-semibold text-slate-700 dark:text-slate-300">{currentRecord.labId}</p>
+              {/* FIX: Show Lab Name instead of ID */}
+              <p className="font-semibold text-slate-700 dark:text-slate-300">{currentRecord.labName || currentRecord.labId}</p>
             </div>
             <div>
               <span className="text-slate-400 text-xs uppercase font-bold">System</span>
               <p className="font-semibold text-slate-700 dark:text-slate-300">#{currentRecord.systemNumber}</p>
             </div>
+            {/* FIX: Show extra badge if AdHoc */}
+            {currentRecord.isAdHoc && (
+              <div className="ml-auto flex items-center">
+                <span className="text-[10px] bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-bold">Extra Access</span>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* --- MY SUBJECTS --- */}
+      {/* ... (Keep My Subjects and Grid sections as they were) ... */}
       <div>
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -392,9 +384,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         </div>
       </div>
 
-      {/* Main Grid: Stats, Calendar, Tasks */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto">
-        {/* 1. Attendance Avg */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 flex flex-col items-center justify-center relative transition-colors">
           <h3 className="w-full text-left font-bold text-slate-800 dark:text-white mb-2">Attendance Avg</h3>
           <div className="h-40 w-40 relative">
@@ -425,12 +415,10 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
           <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-2">{getMotivationalText(attendanceAvg)}</p>
         </div>
 
-        {/* 2. Calendar */}
         <div className="lg:h-full">
           <MiniCalendar />
         </div>
 
-        {/* 3. Tasks */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col transition-colors">
           <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
             <h3 className="font-bold text-slate-800 dark:text-white">Pending Tasks</h3>

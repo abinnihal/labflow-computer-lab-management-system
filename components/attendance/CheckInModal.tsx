@@ -7,7 +7,8 @@ import { uploadSelfie } from '../../services/storageService';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onCheckIn: (labId: string, systemNumber: number, proofUrl: string) => Promise<void>;
+  // FIX: Updated signature to accept labName so we save "Programming Lab" not "l1"
+  onCheckIn: (labId: string, systemNumber: number, proofUrl: string, labName: string) => Promise<void>;
   isLoading: boolean;
   user: User;
 }
@@ -15,7 +16,7 @@ interface Props {
 const CheckInModal: React.FC<Props> = ({ isOpen, onClose, onCheckIn, isLoading, user }) => {
   const [labs, setLabs] = useState<Lab[]>([]);
   const [selectedLab, setSelectedLab] = useState('');
-  const [systemNumber, setSystemNumber] = useState<string>('1'); // Use string for easier input handling
+  const [systemNumber, setSystemNumber] = useState<string>('1');
   const [proofImage, setProofImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -27,9 +28,14 @@ const CheckInModal: React.FC<Props> = ({ isOpen, onClose, onCheckIn, isLoading, 
   }, [isOpen]);
 
   const loadLabs = async () => {
-    const data = await getAllLabs();
-    setLabs(data);
-    if (data.length > 0) setSelectedLab(data[0].id);
+    try {
+      const data = await getAllLabs();
+      setLabs(data);
+      // Default to the first lab if available
+      if (data.length > 0) setSelectedLab(data[0].id);
+    } catch (error) {
+      console.error("Failed to load labs", error);
+    }
   };
 
   const handleSubmit = async () => {
@@ -38,7 +44,13 @@ const CheckInModal: React.FC<Props> = ({ isOpen, onClose, onCheckIn, isLoading, 
     setUploading(true);
     try {
       const url = await uploadSelfie(proofImage);
-      await onCheckIn(selectedLab, parseInt(systemNumber), url);
+
+      // FIX: Find the human-readable lab name
+      const selectedLabObj = labs.find(l => l.id === selectedLab);
+      const labName = selectedLabObj ? selectedLabObj.name : selectedLab;
+
+      // Pass labName to the parent component
+      await onCheckIn(selectedLab, parseInt(systemNumber), url, labName);
     } catch (error) {
       alert("Upload failed. Please check internet connection.");
       setUploading(false);
@@ -72,6 +84,7 @@ const CheckInModal: React.FC<Props> = ({ isOpen, onClose, onCheckIn, isLoading, 
                 onChange={(e) => setSelectedLab(e.target.value)}
                 className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-white font-medium outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               >
+                {labs.length === 0 && <option value="">Loading labs...</option>}
                 {labs.map(lab => <option key={lab.id} value={lab.id}>{lab.name}</option>)}
               </select>
             </div>

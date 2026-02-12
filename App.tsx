@@ -128,7 +128,7 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
             <>
               <div className="px-4 py-2 mt-4 mb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Learning</div>
               <SidebarLink to="/dashboard/attendance" icon="fa-user-check" label="Check In" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Schedule" onClick={() => setSidebarOpen(false)} />
+              <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Calendar & Schedule" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Assignments" badge={badges.tasks} onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/resources" icon="fa-book-open" label="Resource Hub" onClick={() => setSidebarOpen(false)} />
               {/* <SidebarLink to="/dashboard/community" icon="fa-users" label="Community" onClick={() => setSidebarOpen(false)} /> <--- REMOVED */}

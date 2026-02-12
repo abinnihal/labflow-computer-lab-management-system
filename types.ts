@@ -101,6 +101,8 @@ export interface Booking {
   systemCount?: number;
   reminder?: boolean;
   logs?: BookingLog[];
+  course?: string;
+  semester?: string;
 }
 
 export interface Task {
@@ -182,13 +184,14 @@ export interface AttendanceLog {
   studentName?: string; // Optional for easier display
   checkInTime: string;
   checkOutTime?: string;
-  // FIX: Added 'COMPLETED' and 'PENDING' to allowed statuses
   status: 'PRESENT' | 'ABSENT' | 'LATE' | 'COMPLETED' | 'PENDING' | 'EARLY_LEAVE';
   labId?: string;
+  labName?: string;
   systemNumber?: number;
   date?: string;
   proofUrl?: string;
   subjectId: string;
+  isAdHoc?: boolean; // <--- NEW: To distinguish extra access vs class attendance
 }
 
 export interface Notification {

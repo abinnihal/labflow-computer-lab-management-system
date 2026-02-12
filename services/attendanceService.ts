@@ -91,25 +91,30 @@ export const getStudentStatus = async (studentId: string): Promise<{ isCheckedIn
   }
 };
 
+// --- UPDATED CHECK-IN FUNCTION ---
 export const checkInStudent = async (
   user: User,
   labId: string,
   systemNumber: number,
-  proofUrl?: string
+  proofUrl?: string,
+  labName?: string, // <--- NEW PARAM
+  isAdHoc: boolean = false // <--- NEW PARAM
 ): Promise<AttendanceLog> => {
 
   const newLog = {
     studentId: user.id,
     studentName: user.name,
     labId,
+    labName: labName || labId, // Save the Name, fallback to ID if missing
     systemNumber,
     checkInTime: new Date().toISOString(),
     status: 'PRESENT',
     date: new Date().toLocaleDateString(),
-    labName: labId,
-    proofUrl: proofUrl || ''
+    proofUrl: proofUrl || '',
+    isAdHoc: isAdHoc // Save the flag to DB
   };
 
+  // Cast to 'any' briefly to avoid type conflict if types.ts isn't fully refreshed by VS Code yet
   const docRef = await addDoc(collection(db, ATTENDANCE_COLLECTION), newLog);
   return { id: docRef.id, ...newLog } as any as AttendanceLog;
 };

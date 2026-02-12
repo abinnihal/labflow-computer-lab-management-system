@@ -3,6 +3,8 @@ import { User, AttendanceLog, UserRole } from '../../types';
 import { getAttendanceLogs, updateAttendanceRecord, deleteAttendanceRecord } from '../../services/attendanceService';
 import { sendNotification } from '../../services/notificationService';
 import { getAllUsers, updateUser, updateUserStatus, resetUserPassword, deleteUser } from '../../services/userService';
+import { doc, getDoc } from 'firebase/firestore'; // Added imports
+import { db } from '../../services/firebase'; // Added imports
 
 interface Props {
   user: User;
@@ -12,7 +14,10 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
   const [activeTab, setActiveTab] = useState<'ROSTER' | 'SYSTEM_LOGS'>('ROSTER');
   const [logs, setLogs] = useState<any[]>([]);
   const [students, setStudents] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true); // Added Loading State
+  const [loading, setLoading] = useState(true);
+
+  // Context State
+  const [activeContext, setActiveContext] = useState<{ name: string, course: string, semester: string } | null>(null);
 
   // Notification State
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
@@ -36,31 +41,68 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
     refreshData();
   }, [user]);
 
-  // FIX: Made function async to handle Database calls
   const refreshData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Logs (Assuming this is async or needs to be)
-      const attendanceData = await getAttendanceLogs(); // Add await if service is async
+      // 1. Determine Context (Global vs Subject Specific)
+      let contextFilter = null;
+      const activeSubjectId = localStorage.getItem('activeSubjectId');
 
-      // 2. Fetch Users & Filter by Scope
-      const allUsers = await getAllUsers(); // CRITICAL FIX: Added await
+      if (activeSubjectId) {
+        try {
+          const subDoc = await getDoc(doc(db, 'subjects', activeSubjectId));
+          if (subDoc.exists()) {
+            contextFilter = {
+              name: subDoc.data().name,
+              course: subDoc.data().course,
+              semester: subDoc.data().semester
+            };
+            setActiveContext(contextFilter);
+          }
+        } catch (e) {
+          console.error("Error fetching context:", e);
+        }
+      } else {
+        setActiveContext(null);
+      }
+
+      // 2. Fetch Data
+      const attendanceData = await getAttendanceLogs();
+      const allUsers = await getAllUsers();
 
       let myStudents = allUsers.filter(u => u.role === UserRole.STUDENT);
 
-      // SCOPING LOGIC: If Faculty, only show students in managed semesters
-      if (user.role === UserRole.FACULTY && user.managedSemesters && user.managedSemesters.length > 0) {
-        myStudents = myStudents.filter(s => s.semester && user.managedSemesters?.includes(s.semester));
+      // 3. SCOPING LOGIC
+      if (user.role === UserRole.FACULTY) {
+        // A. First filter by Managed Semesters (General Scope)
+        if (user.managedSemesters && user.managedSemesters.length > 0) {
+          myStudents = myStudents.filter(s => s.semester && user.managedSemesters?.includes(s.semester));
+        }
 
-        // Also filter logs to only show my students
-        const myStudentIds = myStudents.map(s => s.id);
-        setLogs(attendanceData.filter((l: any) => myStudentIds.includes(l.studentId)));
-      } else {
-        // Admin sees all
-        setLogs(attendanceData);
+        // B. Then filter by Context (Specific Class Dashboard)
+        if (contextFilter) {
+          myStudents = myStudents.filter(s =>
+            s.semester === contextFilter.semester &&
+            (!contextFilter.course || s.course === contextFilter.course)
+          );
+        }
       }
 
+      // Admin sees all (but could be filtered by context if Admin enters a class dashboard)
+      if (user.role === UserRole.ADMIN && contextFilter) {
+        myStudents = myStudents.filter(s =>
+          s.semester === contextFilter.semester &&
+          (!contextFilter.course || s.course === contextFilter.course)
+        );
+      }
+
+      // 4. Filter Logs based on Visible Students
+      const myStudentIds = myStudents.map(s => s.id);
+      const filteredLogs = attendanceData.filter((l: any) => myStudentIds.includes(l.studentId));
+
       setStudents(myStudents);
+      setLogs(filteredLogs);
+
     } catch (error) {
       console.error("Failed to load student data", error);
     } finally {
@@ -73,7 +115,9 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // --- Bulk Selection ---
+  // ... (Keep existing handlers: handleSelectStudent, handleSelectAll, handleSendNotification, etc.) ...
+  // [Copy-paste all your existing handler functions here unchanged]
+
   const handleSelectStudent = (id: string) => {
     if (selectedStudents.includes(id)) {
       setSelectedStudents(selectedStudents.filter(s => s !== id));
@@ -90,16 +134,12 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
     }
   };
 
-  // --- Actions ---
   const handleSendNotification = async () => {
     if (!message.trim()) return;
     setIsSending(true);
-
-    // Use Promise.all for parallel sending
     await Promise.all(selectedStudents.map(studentId =>
       sendNotification(user.id, studentId, message, 'REMINDER')
     ));
-
     setIsSending(false);
     setMessage('');
     setSelectedStudents([]);
@@ -141,7 +181,7 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
 
   const handleResetPassword = async (studentId: string) => {
     if (window.confirm("Reset this student's password?")) {
-      const tempPass = await resetUserPassword(studentId);
+      await resetUserPassword(studentId);
       alert(`Password reset instructions sent.`);
     }
   };
@@ -154,7 +194,6 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
     }
   };
 
-  // --- Log Correction Handlers ---
   const handleEditLog = (log: any) => {
     setEditingLog(log);
     setLogEditForm({
@@ -192,7 +231,7 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Student Management</h1>
           <p className="text-slate-500 dark:text-slate-400">
             {user.role === 'FACULTY'
-              ? `Managing Students in: ${user.managedSemesters?.join(', ') || 'No semesters assigned'}`
+              ? `Managing Students`
               : 'Manage rosters, edit profiles, and track lab usage.'}
           </p>
         </div>
@@ -211,6 +250,21 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
           </button>
         </div>
       </div>
+
+      {/* NEW: Visual Context Banner */}
+      {activeContext && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 flex items-center gap-3 animate-fade-in-down">
+          <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-300">
+            <i className="fa-solid fa-users-viewfinder"></i>
+          </div>
+          <div>
+            <p className="text-xs text-blue-500 uppercase font-bold">Class Filter Active</p>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Showing students for <span className="text-blue-600 dark:text-blue-400">{activeContext.name}</span> ({activeContext.course} - {activeContext.semester})
+            </p>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className={`p-4 rounded-lg flex items-center gap-3 shadow-sm animate-fade-in-down ${toast.type === 'success' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800'}`}>
@@ -243,7 +297,7 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
                     Total: {students.length}
                   </div>
                 </div>
-                <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-[600px] overflow-y-auto">
+                <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-[600px] overflow-y-auto custom-scrollbar">
                   {students.map(student => (
                     <div key={student.id} className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors gap-4 ${selectedStudents.includes(student.id) ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}>
                       <div className="flex items-center gap-4">
@@ -306,7 +360,7 @@ const StudentManagementPage: React.FC<Props> = ({ user }) => {
                   {students.length === 0 && (
                     <div className="p-8 text-center text-slate-400 dark:text-slate-500">
                       {user.role === 'FACULTY'
-                        ? 'No students found in your assigned semesters.'
+                        ? 'No students found in this class.'
                         : 'No students found.'}
                     </div>
                   )}

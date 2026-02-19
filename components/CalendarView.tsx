@@ -54,24 +54,22 @@ const CalendarView: React.FC<Props> = ({ user }) => {
       let filter = null;
 
       if (user?.role === UserRole.ADMIN) {
-        // Admin: Use manual dropdowns
+        // Admin: Only filter if dropdowns are selected
         if (adminFilter.course && adminFilter.semester) {
           filter = { ...adminFilter, name: 'Master Schedule' };
         }
       } else if (user?.role === UserRole.STUDENT) {
-        // STUDENT FIX: Always use their own profile Course/Sem
-        // This ensures they see their Master Timetable automatically
+        // Student: Always default to their Course/Sem
         if (user.course && user.semester) {
           filter = {
             name: 'My Class',
             course: user.course,
             semester: user.semester
           };
-          // We set this context for data fetching, but we won't show the banner
           setActiveContext(filter);
         }
       } else {
-        // Faculty: Use LocalStorage Context (Context-Aware)
+        // Faculty: Use LocalStorage Context
         const activeSubjectId = localStorage.getItem('activeSubjectId');
         if (activeSubjectId) {
           const subDoc = await getDoc(doc(db, 'subjects', activeSubjectId));
@@ -84,24 +82,45 @@ const CalendarView: React.FC<Props> = ({ user }) => {
             setActiveContext(filter);
           }
         } else {
-          setActiveContext(null); // Reset if global
+          setActiveContext(null);
         }
       }
 
       // ---------------------------------------------------------
-      // 2. FETCH & FILTER BOOKINGS
+      // 2. FETCH & FILTER BOOKINGS (FIXED LOGIC)
       // ---------------------------------------------------------
       const systemBookings = await getAllBookings();
       const mappedBookings = systemBookings
         .filter(b => {
-          if (b.status === 'REJECTED') return false;
+          // Cast status to string to prevent TS error
+          const status = b.status as string;
+          if (status === 'REJECTED' || status === 'CANCELLED') return false;
 
-          // Apply Filter if active
-          if (filter) {
-            return b.course === filter.course && b.semester === filter.semester;
+          // RULE 1: If I am the owner, ALWAYS show my booking (Ad-Hoc or Class)
+          if (user && b.userId === user.id) return true;
+
+          // RULE 2: If I am a Student, show bookings for MY CLASS (Case-Insensitive Check)
+          if (user?.role === UserRole.STUDENT) {
+            const bCourse = b.course?.toLowerCase().trim() || '';
+            const bSem = b.semester?.toLowerCase().trim() || '';
+            const uCourse = user.course?.toLowerCase().trim() || '';
+            const uSem = user.semester?.toLowerCase().trim() || '';
+
+            // If the booking matches my class details, show it!
+            // Note: We check if bCourse exists because some old bookings might be empty
+            if (bCourse && bSem && bCourse === uCourse && bSem === uSem) {
+              return true;
+            }
           }
 
-          // If no filter (Global Faculty/Admin View), show everything
+          // RULE 3: If a filter is active (e.g. Admin/Faculty View)
+          if (filter) {
+            // Basic match
+            if (b.course === filter.course && b.semester === filter.semester) return true;
+            return false;
+          }
+
+          // RULE 4: No filter (Global Admin/Faculty View) -> Show Everything
           return true;
         })
         .map(b => ({
@@ -121,13 +140,12 @@ const CalendarView: React.FC<Props> = ({ user }) => {
       // 3. FETCH MASTER TIMETABLE (Only if Filter is Active)
       // ---------------------------------------------------------
       if (filter) {
-        // Now Students will enter here automatically
         const timeTableSlots = await getClassSchedule(filter.course, filter.semester);
         const generatedClasses = generateRecurringEvents(timeTableSlots, currentDate);
         allEvents.push(...generatedClasses);
       }
 
-      // Sort
+      // Sort chronological
       allEvents.sort((a, b) => {
         const dateA = new Date(a.start.dateTime || a.start.date || '');
         const dateB = new Date(b.start.dateTime || b.start.date || '');
@@ -268,6 +286,7 @@ const CalendarView: React.FC<Props> = ({ user }) => {
               <div>
                 <h4 className="font-bold dark:text-white">{ev.summary} {ev.type === 'CLASS' && <span className="text-[10px] bg-purple-100 text-purple-700 px-2 rounded ml-2">CLASS</span>}</h4>
                 <p className="text-sm text-slate-500">{ev.location}</p>
+                {ev.description && <p className="text-xs text-slate-400 mt-1">{ev.description}</p>}
               </div>
             </div>
           ))}

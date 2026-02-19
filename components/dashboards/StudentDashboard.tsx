@@ -80,7 +80,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
   // --- NEW TIMETABLE STATE ---
   const [activeSession, setActiveSession] = useState<TimeTableSlot | null>(null);
   const [nextClass, setNextClass] = useState<TimeTableSlot | null>(null);
-  const [isAdHocCheckIn, setIsAdHocCheckIn] = useState(false); // Track if checking in without class
+  const [isAdHocCheckIn, setIsAdHocCheckIn] = useState(false);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -89,7 +89,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
       setIsCheckedIn(status.isCheckedIn);
       setCurrentRecord(status.currentRecord);
 
-      // 2. Attendance Avg (Filtered)
+      // 2. Attendance Avg
       try {
         const allBookings = await getAllBookings();
         const now = new Date();
@@ -98,12 +98,10 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         });
 
         const logs = await getLogsByStudent(user.id);
-
-        // FIX: Exclude Ad-Hoc sessions from attendance stats
         const classLogs = logs.filter(l => !l.isAdHoc);
 
         const completed = classLogs.filter(l => l.status === 'COMPLETED' || l.status === 'PRESENT' || l.status === 'EARLY_LEAVE').length;
-        const totalSessions = Math.max(pastBookings.length, 1); // Ideally use timetable count
+        const totalSessions = Math.max(pastBookings.length, 1);
 
         setAttendanceAvg(Math.min(100, Math.round((completed / totalSessions) * 100)));
       } catch (error) {
@@ -141,34 +139,40 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
           // A. Check Master Timetable
           let current: TimeTableSlot | null = await getCurrentLabSession(studentCourse, studentSemester);
 
-          // B. FIX: Check Active Bookings (Faculty or Student bookings)
+          // B. Check Active Bookings (Fixed Logic)
           if (!current) {
             const allBookings = await getAllBookings();
             const now = new Date();
+
             const activeBooking = allBookings.find(b => {
               const start = new Date(b.startTime);
               const end = new Date(b.endTime);
-              // Check time overlap
+
+              // 1. Check time overlap
               const isTimeActive = now >= start && now < end;
-              // Check ownership (Course match OR User match)
-              // This logic allows students to see bookings for their entire batch
-              const isForBatch = b.course === studentCourse && b.semester === studentSemester;
+              if (!isTimeActive) return false;
+              if (b.status !== 'APPROVED') return false;
+
+              // 2. Check ownership/target
+              // Is it MY booking?
               const isForMe = b.userId === user.id;
 
-              return isTimeActive && (isForBatch || isForMe) && b.status === 'APPROVED';
+              // Is it for MY CLASS? (Course/Sem match)
+              const isForBatch = (b.course === studentCourse && b.semester === studentSemester);
+
+              return isForMe || isForBatch;
             });
 
             if (activeBooking) {
-              // Convert Booking to TimeTableSlot format for UI consistency
               current = {
                 id: activeBooking.id,
                 subjectName: activeBooking.subject,
-                labName: activeBooking.labId === 'l1' ? 'Programming Lab' : activeBooking.labId === 'l2' ? 'AI Lab' : 'Network Lab', // Mock map
+                labName: activeBooking.labId === 'l1' ? 'Programming Lab' : activeBooking.labId === 'l2' ? 'AI Lab' : 'Network Lab',
                 startTime: new Date(activeBooking.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
                 endTime: new Date(activeBooking.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
                 course: studentCourse,
                 semester: studentSemester,
-                dayOfWeek: 'Monday', // Dummy
+                dayOfWeek: 'Monday',
                 subjectId: 'booking',
                 facultyId: activeBooking.userId,
                 facultyName: activeBooking.userName,
@@ -179,7 +183,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
           setActiveSession(current);
 
-          // C. Find NEXT class (Master Timetable only for now)
+          // C. Find NEXT class
           const allSlots = await getClassSchedule(studentCourse, studentSemester);
           const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
           const todayName = days[new Date().getDay()];
@@ -201,7 +205,6 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
 
   }, [user.id, refreshTrigger, user.semester, user.course]);
 
-  // --- UPDATED BUTTON LOGIC ---
   const handleToggleAttendance = async () => {
     if (isCheckedIn) {
       setProcessing(true);
@@ -221,16 +224,13 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         setProcessing(false);
       }
     } else {
-      // Check In Logic
       if (!activeSession) {
-        // Confirmation for Ad-Hoc
-        const confirmCheckIn = window.confirm("No active lab hour detected. Do you still want to check in for an extra session? (This will not count towards class attendance)");
+        const confirmCheckIn = window.confirm("No active lab hour detected. Do you still want to check in for an extra session?");
         if (confirmCheckIn) {
           setIsAdHocCheckIn(true);
           setShowCheckInModal(true);
         }
       } else {
-        // Normal Class Check-in
         setIsAdHocCheckIn(false);
         setShowCheckInModal(true);
       }
@@ -241,7 +241,6 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
     setProcessing(true);
     setShowCheckInModal(false);
     try {
-      // FIX: Pass labName and isAdHoc flag
       const record = await checkInStudent(user, labId, systemNumber, proofUrl, labName, isAdHocCheckIn);
 
       await submitActivity(user, 'checkin', {
@@ -284,8 +283,8 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 transition-colors">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="w-14 h-14 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded-xl flex items-center justify-center text-2xl">
-              <i className="fa-solid fa-computer"></i>
+            <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-2xl ${isCheckedIn ? 'bg-green-100 text-green-600' : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300'}`}>
+              <i className={`fa-solid ${isCheckedIn ? 'fa-check-circle' : 'fa-computer'}`}></i>
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
@@ -295,10 +294,10 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
                 {isCheckedIn && currentRecord
                   ? `Checked in at ${new Date(currentRecord.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                   : activeSession
-                    ? `HAPPENING NOW: ${activeSession.subjectName} in ${activeSession.labName}`
+                    ? `HAPPENING NOW: ${activeSession.subjectName}`
                     : nextClass
                       ? `Next: ${nextClass.subjectName} at ${nextClass.startTime}`
-                      : 'Free access is available. You can check in manually.'
+                      : 'Free access is available.'
                 }
               </p>
             </div>
@@ -327,14 +326,12 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
           <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 flex gap-6 text-sm">
             <div>
               <span className="text-slate-400 text-xs uppercase font-bold">Lab</span>
-              {/* FIX: Show Lab Name instead of ID */}
               <p className="font-semibold text-slate-700 dark:text-slate-300">{currentRecord.labName || currentRecord.labId}</p>
             </div>
             <div>
               <span className="text-slate-400 text-xs uppercase font-bold">System</span>
               <p className="font-semibold text-slate-700 dark:text-slate-300">#{currentRecord.systemNumber}</p>
             </div>
-            {/* FIX: Show extra badge if AdHoc */}
             {currentRecord.isAdHoc && (
               <div className="ml-auto flex items-center">
                 <span className="text-[10px] bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-bold">Extra Access</span>
@@ -344,7 +341,6 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
         )}
       </div>
 
-      {/* ... (Keep My Subjects and Grid sections as they were) ... */}
       <div>
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">

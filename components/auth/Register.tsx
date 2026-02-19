@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { registerWithEmail } from '../../services/auth'; // Only use auth service
+import { registerWithEmail } from '../../services/auth';
+import { registerUser } from '../../services/userService'; // Import the new service
 import TerminalLoader from '../ui/TerminalLoader';
 import ThemeToggle from '../ui/ThemeToggle';
 import Logo from '../ui/Logo';
@@ -17,7 +18,9 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
   const [role, setRole] = useState<'STUDENT' | 'FACULTY'>('STUDENT');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isSuccess, setIsSuccess] = useState(false);
+
+  // New State for handling different success types
+  const [successType, setSuccessType] = useState<'PENDING' | 'APPROVED' | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -28,7 +31,7 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
     confirmPassword: '',
     studentId: '',
     course: 'BCA',
-    semester: '1st',
+    semester: 'S1', // Default to standard format S1
     facultyId: '',
     department: '',
   });
@@ -44,7 +47,6 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // ✅ FIXED: Single async function handles the submission
   const handleSubmit = async () => {
     setError('');
 
@@ -69,23 +71,38 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
     setIsLoading(true);
 
     try {
-      // --- 2. Registration Logic ---
-      // This calls auth.ts, which creates the User in Auth AND the Document in Firestore
-      await registerWithEmail(
-        formData.email,
-        formData.password,
-        role === 'STUDENT' ? 'student' : 'faculty',
+      // --- 2. Registration Logic (Using the NEW Service) ---
+      // This calls the 'userService.ts' version which handles the Merge Logic
+      const newUser = await registerUser(
         {
+          email: formData.email,
           name: formData.fullName,
-          department: role === 'FACULTY' ? formData.department : formData.course
-        }
+          role: role,
+          phone: formData.phone,
+          department: role === 'FACULTY' ? formData.department : undefined,
+          course: role === 'STUDENT' ? formData.course : undefined,
+          semester: role === 'STUDENT' ? formData.semester : undefined,
+          studentId: formData.studentId,
+          facultyId: formData.facultyId
+        },
+        formData.password
       );
 
-      // --- 3. Success State ---
-      setIsSuccess(true);
+      // --- 3. Determine Success Type ---
+      if (newUser && newUser.status === 'APPROVED') {
+        setSuccessType('APPROVED'); // Auto-Approved (from CSV or similar)
+      } else {
+        setSuccessType('PENDING'); // Normal flow
+      }
+
     } catch (err: any) {
       console.error("Registration Error:", err);
-      setError(err.message || 'Registration failed. Please try again.');
+      // Firebase specific error mapping
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email is already registered. Please login instead.');
+      } else {
+        setError(err.message || 'Registration failed. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -102,15 +119,32 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
           <TerminalLoader />
           <p className="text-slate-500 dark:text-slate-400 font-medium">Creating your account...</p>
         </div>
-      ) : isSuccess ? (
+      ) : successType === 'APPROVED' ? (
+        // --- CASE 1: AUTO-APPROVED SUCCESS ---
+        <div className="sm:mx-auto sm:w-full sm:max-w-md animate-fade-in-up">
+          <div className="bg-white dark:bg-slate-800 py-8 px-6 shadow-xl sm:rounded-2xl border border-green-200 dark:border-green-800 text-center">
+            <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-sm animate-bounce-slow">
+              <i className="fa-solid fa-check-double"></i>
+            </div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Account Verified & Approved!</h2>
+            <p className="text-slate-600 dark:text-slate-400 mb-8">
+              Your email was recognized in our system. Your account has been <b>automatically approved</b>.
+            </p>
+            <Link to="/login" className="block w-full py-3.5 px-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold transition-all shadow-lg hover:shadow-green-500/30 flex items-center justify-center gap-2">
+              Login Now <i className="fa-solid fa-arrow-right"></i>
+            </Link>
+          </div>
+        </div>
+      ) : successType === 'PENDING' ? (
+        // --- CASE 2: PENDING APPROVAL SUCCESS ---
         <div className="sm:mx-auto sm:w-full sm:max-w-md animate-fade-in-up">
           <div className="bg-white dark:bg-slate-800 py-8 px-6 shadow-xl sm:rounded-2xl border border-slate-100 dark:border-slate-700 text-center">
-            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center text-3xl mx-auto mb-6">
-              <i className="fa-solid fa-check"></i>
+            <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center text-3xl mx-auto mb-6">
+              <i className="fa-solid fa-clock"></i>
             </div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Registration Request Sent</h2>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Request Submitted</h2>
             <p className="text-slate-600 dark:text-slate-400 mb-6">
-              Your account has been created and is <b>pending approval</b>. You will be notified once active.
+              Your account has been created and is <b>pending admin approval</b>. You will be notified via email once active.
             </p>
             <Link to="/login" className="block w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-colors shadow-md">
               Back to Login
@@ -118,6 +152,7 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
           </div>
         </div>
       ) : (
+        // --- CASE 3: REGISTRATION FORM ---
         <>
           <div className="sm:mx-auto sm:w-full sm:max-w-md">
             <div className="flex justify-center mb-6">
@@ -170,15 +205,15 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
                         <select name="course" value={formData.course} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg bg-white">
                           <option value="BCA">BCA</option>
                           <option value="MCA">MCA</option>
-                          <option value="BSC">BSC</option>
-                          <option value="MSC">MSC</option>
+                          <option value="B.Sc Computer Science">B.Sc CS</option>
+                          <option value="M.Sc Computer Science">M.Sc CS</option>
                         </select>
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Semester</label>
                         <select name="semester" value={formData.semester} onChange={handleChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg bg-white">
-                          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-                            <option key={i} value={`${i}th`}>{i}{i === 1 ? 'st' : i === 2 ? 'nd' : i === 3 ? 'rd' : 'th'} Semester</option>
+                          {['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'].map(s => (
+                            <option key={s} value={s}>{s}</option>
                           ))}
                         </select>
                       </div>
@@ -206,11 +241,6 @@ const Register: React.FC<RegisterProps> = ({ isDarkMode, toggleTheme }) => {
                     <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-1">Confirm</label>
                     <input name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} type="password" className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg" placeholder="••••••••" />
                   </div>
-                </div>
-
-                <div className="pt-2">
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase mb-2">Upload ID Proof</label>
-                  <input type="file" className="block w-full text-sm text-slate-500 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-900/30 file:text-blue-700 dark:file:text-blue-300 hover:file:bg-blue-100 dark:hover:file:bg-blue-900/50" />
                 </div>
 
                 <div className="flex items-center pt-2">

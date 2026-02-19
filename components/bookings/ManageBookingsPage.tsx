@@ -4,7 +4,9 @@ import {
   getAllBookings,
   createBooking,
   updateBooking,
-  cancelBooking
+  cancelBooking,
+  approveBooking, // <--- New Import
+  rejectBooking   // <--- New Import
 } from '../../services/bookingService';
 import { getAllUsers } from '../../services/userService';
 import BookingModal from './BookingModal';
@@ -76,15 +78,19 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
       const allBookings = await getAllBookings();
 
       // ---------------------------------------------------------
-      // 3. APPLY FILTERS
+      // 3. APPLY FILTERS (The Critical Fix)
       // ---------------------------------------------------------
       let relevantBookings = allBookings;
 
       // A. Apply Context/Admin Filter (If Active)
       if (filter) {
-        relevantBookings = relevantBookings.filter(b =>
-          b.course === filter.course && b.semester === filter.semester
-        );
+        relevantBookings = relevantBookings.filter(b => {
+          // RULE 1: ALWAYS show MY bookings (Fixes the "disappearing booking" issue)
+          if (b.userId === user.id) return true;
+
+          // RULE 2: Show bookings matching the selected Class/Semester
+          return b.course === filter.course && b.semester === filter.semester;
+        });
       }
 
       // B. Apply Role Scoping (For Non-Admins)
@@ -97,15 +103,18 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
             .map(u => u.id);
           setMyStudentIds(students);
         }
-        // Show bookings if: They are Mine OR They are my Students'
+        // Show bookings if: They are Mine OR They are my Students' OR Context Matches
         relevantBookings = relevantBookings.filter(b =>
-          b.userId === user.id || students.includes(b.userId)
+          b.userId === user.id || students.includes(b.userId) || (filter && b.course === filter.course)
         );
 
       } else if (user.role === UserRole.STUDENT) {
+        // Students ONLY see their own bookings
         relevantBookings = relevantBookings.filter(b => b.userId === user.id);
       }
-      // Admin sees everything (filtered only by the manual dropdowns above)
+
+      // Sort by date (Newest First)
+      relevantBookings.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
       setBookings(relevantBookings);
 
@@ -145,15 +154,33 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
     }
   };
 
+  // --- NEW ACTIONS: Approve / Reject ---
+  const handleApprove = async (bookingId: string) => {
+    try {
+      await approveBooking(bookingId, user.id, user.name);
+      await fetchData();
+    } catch (e) {
+      alert("Failed to approve booking.");
+    }
+  };
+
+  const handleReject = async (bookingId: string) => {
+    if (confirm("Reject this booking request?")) {
+      try {
+        await rejectBooking(bookingId, user.id, user.name);
+        await fetchData();
+      } catch (e) {
+        alert("Failed to reject booking.");
+      }
+    }
+  };
+
   // Filter Logic (Time-based for tabs + Hide Expired Pending)
   const filteredBookings = bookings.filter(b => {
     const now = new Date();
     const endTime = new Date(b.endTime);
-    const isHistory = endTime < now || b.status === 'REJECTED' || b.status === 'COMPLETED';
-
-    if (b.status === 'PENDING' && endTime < now) {
-      // logic handled by isHistory being true
-    }
+    // Consider Cancelled/Rejected as History
+    const isHistory = endTime < now || b.status === 'REJECTED' || b.status === 'COMPLETED' || b.status === 'CANCELLED';
 
     if (activeTab === 'UPCOMING') {
       return !isHistory && (b.status === 'APPROVED' || b.status === 'PENDING');
@@ -171,12 +198,14 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
     switch (status) {
       case 'APPROVED': return 'bg-green-100 text-green-700 border-green-200';
       case 'PENDING': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'REJECTED': return 'bg-red-100 text-red-700 border-red-200';
+      case 'REJECTED':
+      case 'CANCELLED': return 'bg-red-100 text-red-700 border-red-200';
       default: return 'bg-slate-100 text-slate-700';
     }
   };
 
   const isAdmin = user.role === UserRole.ADMIN;
+  const isFaculty = user.role === UserRole.FACULTY;
 
   return (
     <div className="space-y-6">
@@ -241,7 +270,6 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
           </div>
         </div>
       ) : activeContext && (
-        // Faculty/Student Context Banner
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 flex items-center gap-3 animate-fade-in-down">
           <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-300">
             <i className="fa-solid fa-filter"></i>
@@ -284,13 +312,11 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
                     <div>
                       <h3 className="font-bold text-slate-800 dark:text-white text-lg flex items-center gap-2">
                         {booking.subject}
-                        {/* Tag to show who booked it if it's not me */}
                         {booking.userId !== user.id && (
                           <span className="text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-500 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-600">
                             by {booking.userName}
                           </span>
                         )}
-                        {/* Course Tag */}
                         {booking.course && (
                           <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-800">
                             {booking.course} {booking.semester}
@@ -309,12 +335,26 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
                       {new Date(booking.endTime) < new Date() && booking.status === 'PENDING' ? 'EXPIRED' : booking.status}
                     </span>
 
-                    {/* Actions: Edit only if it's UPCOMING and (It's MY booking OR I am Faculty/Admin) */}
-                    {activeTab === 'UPCOMING' && booking.status !== 'REJECTED' && (booking.userId === user.id || user.role !== UserRole.STUDENT) && (
+                    {/* NEW: Approve/Reject Buttons for Admin/Faculty */}
+                    {activeTab === 'UPCOMING' && booking.status === 'PENDING' && (isAdmin || isFaculty) && (
                       <div className="flex gap-2">
-                        <button onClick={() => { setSelectedBooking(booking); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
-                          <i className="fa-solid fa-pen"></i>
+                        <button onClick={() => handleApprove(booking.id)} className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors" title="Approve">
+                          <i className="fa-solid fa-check"></i>
                         </button>
+                        <button onClick={() => handleReject(booking.id)} className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors" title="Reject">
+                          <i className="fa-solid fa-xmark"></i>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Edit/Cancel Actions */}
+                    {activeTab === 'UPCOMING' && booking.status !== 'REJECTED' && booking.status !== 'CANCELLED' && (booking.userId === user.id || isAdmin) && (
+                      <div className="flex gap-2">
+                        {booking.userId === user.id && (
+                          <button onClick={() => { setSelectedBooking(booking); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
+                            <i className="fa-solid fa-pen"></i>
+                          </button>
+                        )}
                         <button onClick={() => handleCancel(booking.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Cancel">
                           <i className="fa-solid fa-trash-can"></i>
                         </button>

@@ -21,7 +21,6 @@ import AttendancePage from './components/AttendancePage';
 import AttendanceProgressPage from './components/attendance/AttendanceProgressPage';
 import StudentTasksPage from './components/tasks/StudentTasksPage';
 import FacultyTasksPage from './components/tasks/FacultyTasksPage';
-// import LearnersConsole from './components/community/LearnersConsole'; // <--- REMOVED
 import StudentProfile from './components/profile/StudentProfile';
 import FacultyProfile from './components/profile/FacultyProfile';
 import ManageBookingsPage from './components/bookings/ManageBookingsPage';
@@ -96,6 +95,7 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
         <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar">
           <SidebarLink to="/dashboard" icon="fa-chart-pie" label="Dashboard" onClick={() => setSidebarOpen(false)} />
 
+          {/* ADMIN SIDEBAR */}
           {user.role === UserRole.ADMIN && (
             <>
               <div className="px-4 py-2 mt-4 mb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Administration</div>
@@ -103,27 +103,34 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
               <SidebarLink to="/dashboard/bookings" icon="fa-calendar-check" label="Manage Bookings" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/complaints" icon="fa-triangle-exclamation" label="Complaints & Review" badge={badges.issues} onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/notifications" icon="fa-bullhorn" label="Global Notifications" onClick={() => setSidebarOpen(false)} />
-              {/* <SidebarLink to="/dashboard/moderation" icon="fa-gavel" label="Console Moderation" onClick={() => setSidebarOpen(false)} />  <--- REMOVED */}
               <SidebarLink to="/dashboard/users" icon="fa-users-gear" label="User Management" badge={badges.approvals} onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/labs" icon="fa-server" label="Labs & Inventory" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/profile" icon="fa-id-card" label="Profile" onClick={() => setSidebarOpen(false)} />
             </>
           )}
 
+          {/* FACULTY SIDEBAR (FIXED BADGES) */}
           {user.role === UserRole.FACULTY && (
             <>
               <div className="px-4 py-2 mt-4 mb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Academic</div>
               <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Calendar & Schedule" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/bookings" icon="fa-computer" label="Manage Bookings" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/progress" icon="fa-bars-progress" label="Check In" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Tasks & Assignment" badge={badges.grading} onClick={() => setSidebarOpen(false)} />
+
+              {/* FIX: Removed badge={badges.grading} so it doesn't show student counts */}
+              <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Tasks & Assignment" onClick={() => setSidebarOpen(false)} />
+
               <SidebarLink to="/dashboard/resources" icon="fa-book-open" label="Resource Hub" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/feedback" icon="fa-comments" label="Feedback & Issue" onClick={() => setSidebarOpen(false)} />
-              <SidebarLink to="/dashboard/students" icon="fa-users-gear" label="Student Management" badge={badges.approvals} onClick={() => setSidebarOpen(false)} />
+
+              {/* FIX: Removed badge={badges.approvals} so Admin approvals don't show here */}
+              <SidebarLink to="/dashboard/students" icon="fa-users-gear" label="Student Management" onClick={() => setSidebarOpen(false)} />
+
               <SidebarLink to="/dashboard/profile" icon="fa-user-tie" label="Profile" onClick={() => setSidebarOpen(false)} />
             </>
           )}
 
+          {/* STUDENT SIDEBAR */}
           {user.role === UserRole.STUDENT && (
             <>
               <div className="px-4 py-2 mt-4 mb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Learning</div>
@@ -131,7 +138,6 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
               <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Calendar & Schedule" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Assignments" badge={badges.tasks} onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/resources" icon="fa-book-open" label="Resource Hub" onClick={() => setSidebarOpen(false)} />
-              {/* <SidebarLink to="/dashboard/community" icon="fa-users" label="Community" onClick={() => setSidebarOpen(false)} /> <--- REMOVED */}
               <SidebarLink to="/dashboard/ai-chat" icon="fa-robot" label="Lab Assistant" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/support" icon="fa-headset" label="Support" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/profile" icon="fa-id-card" label="My Profile" onClick={() => setSidebarOpen(false)} />
@@ -190,7 +196,6 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
 
               <Route path="calendar" element={<CalendarView user={user} />} />
               <Route path="bookings" element={<ManageBookingsPage user={user} />} />
-              {/* <Route path="community" element={<LearnersConsole user={user} />} /> <--- REMOVED */}
               <Route path="resources" element={user.role === UserRole.STUDENT ? <StudentResourcesPage user={user} /> : <FacultyResourcesPage user={user} />} />
               <Route path="tasks" element={user.role === UserRole.STUDENT ? <StudentTasksPage user={user} /> : <FacultyTasksPage user={user} />} />
               <Route path="attendance" element={<AttendancePage user={user} />} />

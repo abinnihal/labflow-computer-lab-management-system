@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { User, AttendanceLog, UserRole } from '../../types';
 import { getStudentAttendance } from '../../services/attendanceService';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { getAllUsers } from '../../services/userService';
+import { getAllLabs } from '../../services/labService'; // <--- NEW IMPORT
+import { collection, query, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 
 interface Props {
@@ -18,6 +20,8 @@ const AttendanceProgressPage: React.FC<Props> = ({ user }) => {
    // Get Active Context (For Faculty)
    const currentSubjectId = localStorage.getItem('activeSubjectId');
    const currentSubjectName = localStorage.getItem('activeSubjectName') || 'Class';
+   const activeSemester = localStorage.getItem('activeSemester');
+   const activeCourse = localStorage.getItem('activeCourse') || 'BCA';
 
    useEffect(() => {
       fetchData();
@@ -26,28 +30,67 @@ const AttendanceProgressPage: React.FC<Props> = ({ user }) => {
    const fetchData = async () => {
       setLoading(true);
       try {
+         // Fetch labs for ID mapping
+         const labsData = await getAllLabs();
+
          if (user.role === UserRole.STUDENT) {
-            // 1. Student: Fetch OWN logs (Can optionally filter by subject here too)
+            // 1. Student: Fetch OWN logs 
             const data = await getStudentAttendance(user.id);
             const safeData = Array.isArray(data) ? data : [];
-            setLogs(safeData);
-            calculateStats(safeData);
+
+            // Map Lab IDs to Real Lab Names
+            const enrichedData = safeData.map(log => {
+               const lab = labsData.find(l => l.id === log.labId);
+               return {
+                  ...log,
+                  labName: lab ? lab.name : log.labId // Fallback to ID if not found
+               };
+            });
+
+            // Sort Descending
+            enrichedData.sort((a, b) => new Date(b.checkInTime).getTime() - new Date(a.checkInTime).getTime());
+
+            setLogs(enrichedData);
+            calculateStats(enrichedData);
          } else {
-            // 2. Faculty: Fetch Logs for the ACTIVE SUBJECT only
-            if (!currentSubjectId) {
+            // 2. Faculty: Fetch Logs for Students in the ACTIVE SUBJECT Context
+            if (!currentSubjectId || !activeSemester) {
                setLogs([]);
                setLoading(false);
                return;
             }
 
-            const q = query(
-               collection(db, 'attendance_logs'),
-               where('subjectId', '==', currentSubjectId), // <--- SUBJECT CENTRIC FILTER
-               orderBy('checkInTime', 'desc')
+            // Step A: Find all students in this class for mapping and filtering
+            const allUsers = await getAllUsers();
+            const classStudents = allUsers.filter(u =>
+               u.role === UserRole.STUDENT &&
+               u.semester === activeSemester &&
+               (u.course === activeCourse || !activeCourse)
             );
+            const studentIds = classStudents.map(s => s.id);
 
-            const snapshot = await getDocs(q);
-            const subjectLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceLog));
+            // Step B: Get all logs
+            const snapshot = await getDocs(query(collection(db, 'attendance_logs'), orderBy('checkInTime', 'desc')));
+            const allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceLog));
+
+            // Step C: Filter and Map IDs to Real Names
+            const subjectLogs = allLogs
+               .filter(log => {
+                  const sid = (log as any).studentId || (log as any).userId;
+                  return sid && studentIds.includes(sid);
+               })
+               .map(log => {
+                  const sid = (log as any).studentId || (log as any).userId;
+                  const studentObj = allUsers.find(u => u.id === sid);
+                  const labObj = labsData.find(l => l.id === log.labId);
+
+                  return {
+                     ...log,
+                     // Override with real names if we found them
+                     studentName: studentObj ? studentObj.name : ((log as any).studentName || 'Unknown'),
+                     labName: labObj ? labObj.name : log.labId
+                  };
+               });
 
             setLogs(subjectLogs);
             calculateStats(subjectLogs);
@@ -77,7 +120,7 @@ const AttendanceProgressPage: React.FC<Props> = ({ user }) => {
       setStats({
          present,
          late,
-         absent: 0, // Absent logic usually requires a schedule comparison
+         absent: 0,
          totalHours: Math.round(hours * 10) / 10
       });
    };
@@ -129,7 +172,9 @@ const AttendanceProgressPage: React.FC<Props> = ({ user }) => {
             </div>
 
             {loading ? (
-               <div className="p-10 text-center text-slate-500">Loading records...</div>
+               <div className="p-10 text-center text-slate-500">
+                  <i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Loading records...
+               </div>
             ) : (
                <div className="overflow-x-auto">
                   <table className="w-full text-left">
@@ -154,11 +199,13 @@ const AttendanceProgressPage: React.FC<Props> = ({ user }) => {
                                  </td>
                                  {user.role !== UserRole.STUDENT && (
                                     <td className="px-6 py-4 font-bold text-slate-700 dark:text-white">
+                                       {/* Uses the mapped studentName */}
                                        {(log as any).studentName || 'Unknown'}
                                     </td>
                                  )}
                                  <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
-                                    {log.labId || 'General'} <span className="text-slate-400 text-xs">#{log.systemNumber}</span>
+                                    {/* Uses the mapped labName */}
+                                    {(log as any).labName || 'General'} <span className="text-slate-400 text-xs">#{log.systemNumber}</span>
                                  </td>
                                  <td className="px-6 py-4 font-mono text-slate-500">
                                     {new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

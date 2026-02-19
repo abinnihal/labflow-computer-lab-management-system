@@ -2,16 +2,15 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { User, UserRole, Lab, TimeTableSlot } from '../../types';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { getFacultySchedule } from '../../services/timetableService'; // <--- NEW IMPORT
-import { getAttendanceLogs, AttendanceRecord, getActivitiesForFaculty, StudentActivity, manualCheckIn } from '../../services/attendanceService';
+import { getFacultySchedule } from '../../services/timetableService';
+import { getAttendanceLogs, AttendanceRecord, StudentActivity, manualCheckIn } from '../../services/attendanceService';
 import { getPendingSubmissionsCount, getTasksByFaculty } from '../../services/taskService';
 import { getPendingMaintenanceCount } from '../../services/maintenanceService';
 import { getAllLabs } from '../../services/labService';
-import BookingModal from '../bookings/BookingModal';
+import { getAllUsers, getPendingUsersByRole } from '../../services/userService';
 import ApprovalList from '../approvals/ApprovalList';
-import { getPendingUsersByRole } from '../../services/userService';
 import { MOCK_ROSTER } from '../../constants';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 
 interface Props {
@@ -32,10 +31,11 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
   const contextType = localStorage.getItem('activeContext') as 'SUBJECT' | 'ADVISOR' | null;
   const subjectId = localStorage.getItem('activeSubjectId');
   const subjectName = localStorage.getItem('activeSubjectName') || 'General';
-  const subjectSemester = localStorage.getItem('activeSemester') || 'All';
+  const fallbackSemester = localStorage.getItem('activeSemester') || 'All';
+  const subjectCourse = localStorage.getItem('activeCourse') || 'BCA';
 
   // State
-  const [todayClasses, setTodayClasses] = useState<TimeTableSlot[]>([]); // <--- REPLACED SCHEDULE STATE
+  const [todayClasses, setTodayClasses] = useState<TimeTableSlot[]>([]);
   const [loadingSchedule, setLoadingSchedule] = useState(true);
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceRecord[]>([]);
   const [studentActivities, setStudentActivities] = useState<StudentActivity[]>([]);
@@ -49,7 +49,6 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
   const [labs, setLabs] = useState<Lab[]>([]);
 
   // Modals & Stats
-  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [manualEntryData, setManualEntryData] = useState({ studentId: '', labId: '', status: 'PRESENT' as 'PRESENT' | 'LATE' });
@@ -77,13 +76,12 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
     try {
       if (!subjectId) return;
 
-      // 1. Load Timetable (Replaces Google Calendar)
+      // 1. Load Timetable
       try {
         const allSlots = await getFacultySchedule(user.id);
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const todayName = days[new Date().getDay()];
 
-        // Filter for TODAY and Sort by time
         const today = allSlots
           .filter(s => s.dayOfWeek === todayName)
           .sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -97,38 +95,89 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
 
       // --- SUBJECT MODE DATA ---
       if (contextType === 'SUBJECT') {
-        // A. Attendance (Filtered by Subject)
-        const logs = await getAttendanceLogs();
-        const subjectLogs = logs.filter(l => l.subjectId === subjectId);
+
+        // FIX: FETCH EXACT SEMESTER FROM DB TO PREVENT ZEROES
+        let realSemester = fallbackSemester;
+        try {
+          const subDoc = await getDoc(doc(db, 'subjects', subjectId));
+          if (subDoc.exists()) {
+            realSemester = subDoc.data().semester || fallbackSemester;
+          }
+        } catch (e) { console.error(e) }
+
+        // A. Find Students in this Class
+        const allUsers = await getAllUsers();
+        const classStudents = allUsers.filter(u =>
+          u.role === UserRole.STUDENT &&
+          (u.semester || '').toLowerCase().trim() === (realSemester || '').toLowerCase().trim()
+        );
+        const studentIds = classStudents.map(s => s.id);
+
+        // B. Filter Logs for ONLY these students & Map Real Names
+        const allLogs = await getAttendanceLogs();
+
+        const subjectLogs = allLogs
+          .filter(l => {
+            const sid = (l as any).studentId || (l as any).userId;
+            return sid && studentIds.includes(sid);
+          })
+          .map(log => {
+            const sid = (log as any).studentId || (log as any).userId;
+            const studentObj = allUsers.find(u => u.id === sid);
+            return {
+              ...log,
+              studentName: studentObj ? studentObj.name : ((log as any).studentName || 'Unknown')
+            };
+          });
+
         setAttendanceLogs(subjectLogs);
 
         const labsData = await getAllLabs();
         setLabs(labsData || []);
 
-        // B. Activities (Filtered by Semester)
-        if (user.department && user.managedSemesters) {
-          const acts = await getActivitiesForFaculty(user.department, user.managedSemesters);
-          setStudentActivities(acts || []);
-        }
+        // C. Activities (Generated Locally from Logs to prevent empty UI)
+        const generatedActivities: StudentActivity[] = subjectLogs.map(log => ({
+          id: log.id,
+          studentId: (log as any).studentId || (log as any).userId,
+          studentName: (log as any).studentName || 'Unknown',
+          activityType: 'checkin',
+          timestamp: log.checkInTime,
+          // --- FIX FOR TYPESCRIPT ERROR ---
+          department: user.department || 'CS',
+          semester: realSemester,
+          activityPayload: {
+            labId: log.labId,
+            status: log.status
+          }
+        }));
 
-        // C. Stats
+        // Sort the activities so the newest ones are at the top
+        generatedActivities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setStudentActivities(generatedActivities);
+
+        // D. Stats
         const allTasks = await getTasksByFaculty(user.id);
         const subjectTasks = allTasks.filter(t => t.subjectId === subjectId);
         const gradingCount = subjectTasks.filter(t => t.type === 'ASSIGNMENT' && t.status === 'OPEN').length;
         const issuesCount = await getPendingMaintenanceCount(user.id);
 
+        // Live Attendance
+        const todayStr = new Date().toDateString();
+        const liveCount = subjectLogs.filter(l =>
+          new Date(l.checkInTime).toDateString() === todayStr &&
+          (l.status === 'PRESENT' || l.status === 'LATE')
+        ).length;
+
         setStats({
           pendingGrading: gradingCount,
           labIssues: issuesCount,
-          liveAttendance: subjectLogs.filter(l => l.status === 'PRESENT').length
+          liveAttendance: liveCount
         });
       }
       // --- ADVISOR MODE DATA ---
       else if (contextType === 'ADVISOR') {
-        // A. Pending Approvals (Filtered by Semester)
         const allPending = await getPendingUsersByRole(UserRole.STUDENT, user.department);
-        // Only show students who match the advisor's semester
-        const myPending = allPending.filter(s => s.semester === subjectSemester);
+        const myPending = allPending.filter(s => s.semester === fallbackSemester);
         setPendingCount(myPending.length);
       }
 
@@ -152,10 +201,14 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
     attendanceLogs.forEach(log => {
       const dateKey = new Date(log.checkInTime).toLocaleDateString();
       const key = `${dateKey}-${log.labId}`;
+
       if (!groups[key]) {
+        const labObj = labs.find(l => l.id === log.labId);
+        const realLabName = labObj ? labObj.name : (log.labId || 'General Lab');
+
         groups[key] = {
           id: key,
-          labName: log.labId || 'General Lab',
+          labName: realLabName,
           date: dateKey,
           totalStudents: 0,
           logs: []
@@ -165,7 +218,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
       groups[key].totalStudents++;
     });
     return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [attendanceLogs]);
+  }, [attendanceLogs, labs]);
 
   useEffect(() => {
     if (sessions.length > 0 && !selectedSessionId) {
@@ -179,11 +232,18 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
   const graphData = useMemo(() => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const dataMap = days.map(day => ({ name: day, present: 0, absent: 0 }));
+
     if (Array.isArray(attendanceLogs)) {
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
       attendanceLogs.forEach(log => {
-        const d = new Date(log.checkInTime).getDay();
-        if (dataMap[d]) {
-          dataMap[d].present += 1;
+        const logDate = new Date(log.checkInTime);
+        if (logDate > oneWeekAgo) {
+          const d = logDate.getDay();
+          if (dataMap[d]) {
+            dataMap[d].present += 1;
+          }
         }
       });
     }
@@ -191,9 +251,12 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
   }, [attendanceLogs]);
 
   const getLabUtilization = (labId: string) => {
-    return Array.isArray(attendanceLogs)
-      ? attendanceLogs.filter(l => l.labId === labId && l.status === 'PRESENT').length
-      : 0;
+    const todayStr = new Date().toDateString();
+    const activeLogs = attendanceLogs.filter(l =>
+      l.labId === labId &&
+      new Date(l.checkInTime).toDateString() === todayStr
+    );
+    return activeLogs.length;
   };
 
   return (
@@ -203,7 +266,7 @@ const FacultyDashboard: React.FC<Props> = ({ user }) => {
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <div className="flex items-center gap-2 mb-2 opacity-80 text-sm font-bold uppercase tracking-wider">
-              <span className="bg-white/20 px-2 py-1 rounded">{subjectSemester}</span>
+              <span className="bg-white/20 px-2 py-1 rounded">{fallbackSemester}</span>
               <span>{contextType === 'ADVISOR' ? 'Advisory Dashboard' : 'Classroom Dashboard'}</span>
             </div>
             <h1 className="text-3xl font-bold mb-1">{subjectName}</h1>

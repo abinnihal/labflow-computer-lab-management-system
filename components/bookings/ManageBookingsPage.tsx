@@ -5,8 +5,8 @@ import {
   createBooking,
   updateBooking,
   cancelBooking,
-  approveBooking, // <--- New Import
-  rejectBooking   // <--- New Import
+  approveBooking,
+  rejectBooking
 } from '../../services/bookingService';
 import { getAllUsers } from '../../services/userService';
 import BookingModal from './BookingModal';
@@ -335,8 +335,8 @@ const ManageBookingsPage: React.FC<{ user: User }> = ({ user }) => {
                       {new Date(booking.endTime) < new Date() && booking.status === 'PENDING' ? 'EXPIRED' : booking.status}
                     </span>
 
-                    {/* NEW: Approve/Reject Buttons for Admin/Faculty */}
-                    {activeTab === 'UPCOMING' && booking.status === 'PENDING' && (isAdmin || isFaculty) && (
+                    {/* FIX: Admin can approve all. Faculty can ONLY approve if they didn't create it themselves. */}
+                    {activeTab === 'UPCOMING' && booking.status === 'PENDING' && (isAdmin || (isFaculty && booking.userId !== user.id)) && (
                       <div className="flex gap-2">
                         <button onClick={() => handleApprove(booking.id)} className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors" title="Approve">
                           <i className="fa-solid fa-check"></i>

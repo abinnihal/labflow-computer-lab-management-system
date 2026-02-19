@@ -3,7 +3,7 @@ import { User, Task, Subject } from '../../types';
 import { getStudentTaskHistory, submitTask } from '../../services/taskService';
 import { uploadAssignment } from '../../services/storageService';
 import { useTabMonitor } from '../../hooks/useTabMonitor';
-import { getStudentSubjects } from '../../services/subjectService'; // <--- NEW IMPORT
+import { getStudentSubjects } from '../../services/subjectService';
 
 interface Props {
   user: User;
@@ -14,7 +14,7 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
   const [activeTab, setActiveTab] = useState<'PENDING' | 'COMPLETED'>('PENDING');
   const [loading, setLoading] = useState(true);
 
-  // --- NEW: SUBJECT FILTERING STATE ---
+  // --- SUBJECT FILTERING STATE ---
   const [enrolledSubjects, setEnrolledSubjects] = useState<Subject[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('ALL');
 
@@ -33,21 +33,15 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
 
   useEffect(() => {
     refreshTasks();
-    fetchStudentSubjects(); // <--- Fetch Subjects on Load
+    fetchStudentSubjects();
     return () => {
       localStorage.setItem('isExamActive', 'false');
     };
   }, [user.id]);
 
-  // --- NEW: FETCH SUBJECTS LOGIC ---
+  // --- FETCH SUBJECTS LOGIC ---
   const fetchStudentSubjects = async () => {
     try {
-      // If student profile has a semester (e.g., "S5"), fetch subjects for S5
-      if (!user.managedSemesters && !user.semester) return;
-
-      // Note: Depending on your User type definition, semester might be 'semester' or 'managedSemesters[0]'
-      // Assuming 'user.semester' exists for students based on previous context, 
-      // or we fallback to a hardcoded check if your user object varies.
       const semester = user.semester || (user.managedSemesters ? user.managedSemesters[0] : '');
 
       if (semester) {
@@ -66,7 +60,7 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
     setLoading(false);
   };
 
-  // --- TIMER LOGIC (Unchanged) ---
+  // --- TIMER LOGIC ---
   useEffect(() => {
     if (!isExamActive || timeLeft <= 0) return;
 
@@ -172,14 +166,12 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // --- NEW: FILTERING LOGIC ---
+  // --- FILTERING LOGIC ---
   const filteredTasks = taskHistory.filter(item => {
-    // 1. Tab Filter
     const matchesTab = activeTab === 'PENDING'
       ? (item.status === 'PENDING' || item.status === 'OVERDUE')
       : (item.status === 'SUBMITTED' || item.status === 'APPROVED' || item.status === 'REJECTED');
 
-    // 2. Subject Filter (The key addition)
     const matchesSubject = selectedSubjectId === 'ALL'
       ? true
       : item.task.subjectId === selectedSubjectId;
@@ -196,7 +188,6 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
         </div>
 
         <div className="flex gap-4">
-          {/* --- NEW: SUBJECT FILTER UI --- */}
           {enrolledSubjects.length > 0 && (
             <select
               value={selectedSubjectId}
@@ -235,7 +226,6 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
                         {task.type === 'LAB_EXAM' ? 'LAB EXAM' : task.type.replace('_', ' ')}
                       </span>
 
-                      {/* SUBJECT BADGE */}
                       {task.subjectName && (
                         <span className="px-2 py-1 rounded text-[10px] font-bold uppercase bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300">
                           {task.subjectName}
@@ -246,11 +236,19 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
                   </div>
                   <h3 className="font-bold text-slate-800 dark:text-white mb-2">{task.title}</h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 line-clamp-3">{task.description}</p>
+
+                  {/* --- FIX: CHECK FOR attachmentUrl INSTEAD OF fileUrl --- */}
+                  {((task as any).attachments?.length > 0 || (task as any).attachmentUrl) && (
+                    <div className="text-xs text-blue-600 dark:text-blue-400 font-medium mb-3 flex items-center gap-1">
+                      <i className="fa-solid fa-paperclip"></i> Contains Attachment
+                    </div>
+                  )}
+
                 </div>
                 <div className="p-4 bg-slate-50 dark:bg-slate-900/30 border-t border-slate-100 dark:border-slate-700">
                   {status === 'PENDING' || status === 'OVERDUE' ? (
                     <button onClick={() => handleStartExam(task)} className={`w-full font-bold py-2 rounded-lg text-white shadow-sm transition-colors ${task.type === 'LAB_EXAM' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                      {task.type === 'LAB_EXAM' ? 'Start Exam Mode' : 'Submit Work'}
+                      {task.type === 'LAB_EXAM' ? 'Start Exam Mode' : 'View & Submit Work'}
                     </button>
                   ) : (
                     <div className="w-full text-center py-2 rounded-lg font-bold text-sm uppercase bg-green-100 text-green-700">{status}</div>
@@ -262,7 +260,7 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
         </div>
       )}
 
-      {/* --- EXAM / SUBMISSION MODAL (Unchanged Logic, just styling consistency) --- */}
+      {/* --- EXAM / SUBMISSION MODAL --- */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-4xl p-6 flex flex-col h-[85vh] animate-fade-in-up ${isExamActive ? 'border-4 border-red-500' : ''}`}>
@@ -287,7 +285,43 @@ const StudentTasksPage: React.FC<Props> = ({ user }) => {
             <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden">
               <div className="md:w-1/3 overflow-y-auto pr-2 border-r border-slate-200 dark:border-slate-700">
                 <p className="text-sm text-slate-500 uppercase font-bold mb-2">Instructions</p>
-                <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{selectedTask.description}</p>
+                <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap mb-6">{selectedTask.description}</p>
+
+                {/* --- FIX: CHECK FOR attachmentUrl INSTEAD OF fileUrl --- */}
+                {((selectedTask as any).attachments?.length > 0 || (selectedTask as any).attachmentUrl) && (
+                  <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl">
+                    <p className="text-xs font-bold text-blue-800 dark:text-blue-300 uppercase mb-2">Teacher Resources</p>
+                    <div className="space-y-2">
+                      {/* Handle Array of attachments */}
+                      {(selectedTask as any).attachments?.map((url: string, index: number) => (
+                        <a
+                          key={index}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm bg-white dark:bg-slate-800 px-3 py-2 rounded border border-slate-200 dark:border-slate-700 hover:border-blue-400 transition-colors"
+                        >
+                          <i className="fa-solid fa-download text-blue-500"></i>
+                          <span className="truncate">Attachment {index + 1}</span>
+                        </a>
+                      ))}
+                      {/* Handle Single String (attachmentUrl) */}
+                      {(selectedTask as any).attachmentUrl && !(selectedTask as any).attachments && (
+                        <a
+                          href={(selectedTask as any).attachmentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm bg-white dark:bg-slate-800 px-3 py-2 rounded border border-slate-200 dark:border-slate-700 hover:border-blue-400 transition-colors"
+                        >
+                          <i className="fa-solid fa-download text-blue-500"></i>
+                          <span className="truncate">View Assignment File</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {/* ------------------------------------------- */}
+
               </div>
 
               <div className="md:w-2/3 flex flex-col">

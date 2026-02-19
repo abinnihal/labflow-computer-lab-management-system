@@ -1,6 +1,5 @@
-// REPLACE WITH YOUR ACTUAL KEYS
 const CLOUD_NAME = 'ddihd0l4n';
-const UPLOAD_PRESET = 'labflow_upload'; // Or whatever you named it
+const UPLOAD_PRESET = 'labflow_upload';
 
 interface UploadResult {
     url: string;
@@ -51,10 +50,19 @@ export const uploadAssignment = async (file: File): Promise<UploadResult> => {
         }
 
         const data = await response.json();
+
+        // --- FIX FOR PDF 401 & BROWSER CRASH ---
+        // Cloudinary blocks inline viewing of PDFs on free tiers. 
+        // We inject `fl_attachment` into the URL to force the browser to download it safely.
+        let finalUrl = data.secure_url;
+        if (data.format === 'pdf' || file.type === 'application/pdf') {
+            finalUrl = finalUrl.replace('/upload/', '/upload/fl_attachment/');
+        }
+
         return {
-            url: data.secure_url,
+            url: finalUrl,
             publicId: data.public_id,
-            format: data.format
+            format: data.format || file.name.split('.').pop() || 'unknown'
         };
     } catch (error) {
         console.error("Assignment upload error:", error);

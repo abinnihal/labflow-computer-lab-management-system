@@ -6,7 +6,7 @@ import {
    getSubmissionsForTask,
    updateSubmissionStatus,
    getTaskStats,
-   deleteTask // <--- NEW IMPORT
+   deleteTask
 } from '../../services/taskService';
 import { uploadAssignment } from '../../services/storageService';
 import { doc, getDoc } from 'firebase/firestore';
@@ -28,7 +28,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
    const [activeTab, setActiveTab] = useState<TaskTab>('ASSIGNMENT');
    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
-   // --- FIX FLAW 3: Store the actual semester (e.g. "S5") ---
+   // Store the actual semester (e.g. "S5")
    const [activeSemester, setActiveSemester] = useState<string>('');
 
    const [selectedTaskForGrading, setSelectedTaskForGrading] = useState<Task | null>(null);
@@ -49,14 +49,13 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
       }
    }, [user.id, subjectId]);
 
-   // --- NEW: Fetch the real semester for this subject ---
+   // Fetch the real semester for this subject
    const fetchSubjectDetails = async () => {
       if (!subjectId) return;
       try {
          const subDoc = await getDoc(doc(db, 'subjects', subjectId));
          if (subDoc.exists()) {
             const data = subDoc.data();
-            // This ensures we get "S5" or "S1" correctly from the database
             setActiveSemester(data.semester || '');
          }
       } catch (err) {
@@ -80,6 +79,20 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
       }
       setStats(newStats);
       setLoading(false);
+   };
+
+   // --- FIX: Dynamic Modal Initialization ---
+   const handleOpenCreateModal = () => {
+      setNewTask({
+         title: '',
+         description: '',
+         dueDate: '',
+         type: activeTab, // Set type based on the current tab
+         priority: 'MEDIUM',
+         duration: ''
+      });
+      setAttachmentFile(null);
+      setIsCreateModalOpen(true);
    };
 
    const handleCreateTask = async () => {
@@ -106,19 +119,13 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
             assignedById: user.id,
             assignedByName: user.name,
             status: 'OPEN',
-
-            // --- CRITICAL FIX FLAW 3: Save Semester so Students see it ---
-            course: activeSemester,
-
+            course: activeSemester, // Save Semester so Students see it
             subjectId: subjectId,
             subjectName: subjectName,
-
             attachmentUrl: uploadedUrl
          });
 
          setIsCreateModalOpen(false);
-         setNewTask({ title: '', description: '', dueDate: '', type: 'ASSIGNMENT', priority: 'MEDIUM', duration: '' });
-         setAttachmentFile(null);
          refreshTasks();
       } catch (error) {
          console.error("Failed to create task", error);
@@ -126,7 +133,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
       } finally { setIsSubmitting(false); }
    };
 
-   // --- FIX FLAW 2: Handle Delete ---
+   // Handle Delete
    const handleDeleteTask = async (e: React.MouseEvent, taskId: string) => {
       e.stopPropagation(); // Prevent opening the grading panel
       if (!window.confirm("Are you sure you want to delete this task? All student submissions will be lost.")) return;
@@ -173,7 +180,6 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Assignments & Exams</h1>
                <p className="text-slate-500 dark:text-slate-400">
                   Managing: <span className="font-bold text-blue-600">{subjectName}</span>
-                  {/* Show the active semester badge so you know it's working */}
                   <span className="ml-2 text-xs bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{activeSemester}</span>
                </p>
             </div>
@@ -185,7 +191,8 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                   <button onClick={() => setActiveTab('PROJECT')} className={`flex-1 sm:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'PROJECT' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Projects</button>
                </div>
 
-               <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 w-full sm:w-auto justify-center">
+               {/* FIX: Call handleOpenCreateModal instead of just setting state */}
+               <button onClick={handleOpenCreateModal} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 w-full sm:w-auto justify-center">
                   <i className="fa-solid fa-plus"></i> Create New
                </button>
             </div>
@@ -203,7 +210,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                      filteredTasks.map(task => (
                         <div key={task.id} className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border transition-all cursor-pointer group relative ${selectedTaskForGrading?.id === task.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 dark:border-slate-700 hover:border-blue-400'}`} onClick={() => openGrading(task)}>
 
-                           {/* --- DELETE BUTTON (Flaw 2 Fix) --- */}
+                           {/* DELETE BUTTON */}
                            <button
                               onClick={(e) => handleDeleteTask(e, task.id)}
                               className="absolute top-4 right-4 text-slate-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 transition-all opacity-0 group-hover:opacity-100"
@@ -219,6 +226,14 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                               </div>
                               <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${task.type === 'LAB_EXAM' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}>{task.type.replace('_', ' ')}</span>
                            </div>
+
+                           {/* ATTACHMENT INDICATOR */}
+                           {task.attachmentUrl && (
+                              <div className="text-[10px] text-blue-500 font-bold mb-2 flex items-center gap-1">
+                                 <i className="fa-solid fa-paperclip"></i> Attachment Included
+                              </div>
+                           )}
+
                            <div className="mt-4 flex items-center gap-4 text-xs">
                               <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
                                  <div className="bg-green-500 h-full" style={{ width: `${stats[task.id] ? (stats[task.id].submitted / 30) * 100 : 0}%` }}></div>
@@ -230,7 +245,7 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                   )}
             </div>
 
-            {/* Grading Panel (Unchanged) */}
+            {/* Grading Panel */}
             <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 p-6 h-[600px] overflow-y-auto">
                {selectedTaskForGrading ? (
                   <>
@@ -238,7 +253,9 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                         <h2 className="text-xl font-bold text-slate-800 dark:text-white">{selectedTaskForGrading.title}</h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400">Submissions Review</p>
                         {selectedTaskForGrading.attachmentUrl && (
-                           <a href={selectedTaskForGrading.attachmentUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-3 py-1 rounded hover:bg-blue-200 transition-colors">View Task Attachment</a>
+                           <a href={selectedTaskForGrading.attachmentUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-3 py-1 rounded hover:bg-blue-200 transition-colors">
+                              <i className="fa-solid fa-download mr-1"></i> View Task Attachment
+                           </a>
                         )}
                      </div>
 
@@ -294,7 +311,6 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                         </div>
                         <div>
                            <p className="text-xs text-blue-400 uppercase font-bold">Assigning To</p>
-                           {/* Show the semester being assigned to */}
                            <p className="text-sm font-bold text-white">{subjectName} ({activeSemester})</p>
                         </div>
                      </div>

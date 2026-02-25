@@ -3,6 +3,11 @@ import { HashRouter as Router, Routes, Route, Navigate, useLocation, Link } from
 import { User, UserRole } from './types';
 import { useBadges } from './hooks/useBadges';
 
+// --- Firebase Imports (NEW) ---
+import { auth, db } from './services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+
 // --- Auth Components ---
 import Login from './components/auth/Login';
 import SignUpContainer from './components/auth/SignUpContainer';
@@ -116,16 +121,10 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
               <SidebarLink to="/dashboard/calendar" icon="fa-calendar-days" label="Calendar & Schedule" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/bookings" icon="fa-computer" label="Manage Bookings" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/progress" icon="fa-bars-progress" label="Check In" onClick={() => setSidebarOpen(false)} />
-
-              {/* FIX: Removed badge={badges.grading} so it doesn't show student counts */}
               <SidebarLink to="/dashboard/tasks" icon="fa-list-check" label="Tasks & Assignment" onClick={() => setSidebarOpen(false)} />
-
               <SidebarLink to="/dashboard/resources" icon="fa-book-open" label="Resource Hub" onClick={() => setSidebarOpen(false)} />
               <SidebarLink to="/dashboard/feedback" icon="fa-comments" label="Feedback & Issue" onClick={() => setSidebarOpen(false)} />
-
-              {/* FIX: Removed badge={badges.approvals} so Admin approvals don't show here */}
               <SidebarLink to="/dashboard/students" icon="fa-users-gear" label="Student Management" onClick={() => setSidebarOpen(false)} />
-
               <SidebarLink to="/dashboard/profile" icon="fa-user-tie" label="Profile" onClick={() => setSidebarOpen(false)} />
             </>
           )}
@@ -224,6 +223,7 @@ const DashboardLayout: React.FC<{ user: User; handleLogout: () => void; isDarkMo
 const AppContent: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [loadingAuth, setLoadingAuth] = useState(true); // NEW: Auth loading state
 
   useEffect(() => {
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -236,8 +236,58 @@ const AppContent: React.FC = () => {
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
+  // NEW: Firebase Auth Listener (WITH UPPERCASE FIX)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+
+            // --- FIX FOR ROLE CASE-SENSITIVITY ---
+            const userData = userDoc.data();
+            if (userData.role) {
+              userData.role = userData.role.toUpperCase(); // Force "admin" to "ADMIN"
+            }
+            setUser(userData as User);
+            // -------------------------------------
+
+          } else {
+            setUser(null);
+          }
+        } catch (error) {
+          console.error("Error fetching user profile:", error);
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+      setLoadingAuth(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
-  const handleLogout = () => setUser(null);
+
+  // NEW: Added auth.signOut() to clear Firebase session as well
+  const handleLogout = () => {
+    auth.signOut().then(() => {
+      setUser(null);
+    }).catch((error) => console.error("Logout Error:", error));
+  };
+
+  // NEW: Loading Screen while Firebase checks session
+  if (loadingAuth) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-gray-900' : 'bg-gray-100'}`}>
+        <div className="animate-pulse flex flex-col items-center gap-4">
+          <Logo className="w-16 h-16 opacity-50" textClassName="hidden" />
+          <p className="text-slate-500 font-medium">Restoring session...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Routes>

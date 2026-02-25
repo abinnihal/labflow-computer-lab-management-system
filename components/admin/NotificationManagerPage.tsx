@@ -16,27 +16,27 @@ const TARGET_GROUPS = [
 ];
 
 const TEMPLATES = [
-  { 
-    label: 'System Maintenance', 
-    title: 'Scheduled Maintenance Alert', 
+  {
+    label: 'System Maintenance',
+    title: 'Scheduled Maintenance Alert',
     msg: 'The system will be undergoing scheduled maintenance today from 10:00 PM to 12:00 AM. Please save your work.',
     type: 'ALERT'
   },
-  { 
-    label: 'Holiday Announcement', 
-    title: 'College Holiday Notice', 
+  {
+    label: 'Holiday Announcement',
+    title: 'College Holiday Notice',
     msg: 'The college will remain closed tomorrow on account of public holiday. Classes will resume the day after.',
     type: 'INFO'
   },
-  { 
-    label: 'Emergency Alert', 
-    title: 'URGENT: Campus Update', 
+  {
+    label: 'Emergency Alert',
+    title: 'URGENT: Campus Update',
     msg: 'Due to severe weather conditions, all lab sessions for today are cancelled. Stay safe.',
     type: 'ALERT'
   },
-  { 
-    label: 'General Reminder', 
-    title: 'General Reminder', 
+  {
+    label: 'General Reminder',
+    title: 'General Reminder',
     msg: '',
     type: 'INFO'
   },
@@ -44,17 +44,17 @@ const TEMPLATES = [
 
 const NotificationManagerPage: React.FC<Props> = ({ user }) => {
   const [history, setHistory] = useState<NotificationLog[]>([]);
-  
+
   // Form State
   const [target, setTarget] = useState('ALL_USERS');
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [type, setType] = useState<'INFO' | 'ALERT' | 'REMINDER'>('INFO');
-  
+
   // Channel States
   const [sendEmail, setSendEmail] = useState(true);
   const [sendWhatsApp, setSendWhatsApp] = useState(false);
-  
+
   const [isSending, setIsSending] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -108,14 +108,14 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* Compose Section */}
         <div className="lg:col-span-1">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 p-6 sticky top-6 transition-colors">
             <h2 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
               <i className="fa-solid fa-pen-to-square text-blue-600 dark:text-blue-400"></i> Compose Message
             </h2>
-            
+
             {successMsg && (
               <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg text-sm flex items-center gap-2 border border-green-200 dark:border-green-800 animate-fade-in-down">
                 <i className="fa-solid fa-circle-check"></i> {successMsg}
@@ -125,8 +125,8 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
             <form onSubmit={handleSend} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Target Audience</label>
-                <select 
-                  value={target} 
+                <select
+                  value={target}
                   onChange={(e) => setTarget(e.target.value)}
                   className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-slate-50 dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500"
                 >
@@ -136,7 +136,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Quick Template</label>
-                <select 
+                <select
                   onChange={handleTemplateChange}
                   className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-700 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
                 >
@@ -149,7 +149,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Notification Type</label>
                 <div className="flex gap-2">
                   {['INFO', 'ALERT', 'REMINDER'].map(t => (
-                    <button 
+                    <button
                       key={t}
                       type="button"
                       onClick={() => setType(t as any)}
@@ -163,10 +163,10 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Subject / Title</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
-                  value={title} 
+                  value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Enter notification title"
                   className="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
@@ -175,32 +175,32 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Message Body</label>
-                <textarea 
+                <textarea
                   required
-                  value={message} 
+                  value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="Type your message here..."
                   className="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 h-32 focus:ring-2 focus:ring-blue-500 resize-none"
                 ></textarea>
               </div>
-
+              {/*
               <div className="space-y-2 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700">
                 <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">Delivery Channels</p>
                 <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    id="email" 
-                    checked={sendEmail} 
+                  <input
+                    type="checkbox"
+                    id="email"
+                    checked={sendEmail}
                     onChange={(e) => setSendEmail(e.target.checked)}
                     className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 dark:bg-slate-700"
                   />
                   <label htmlFor="email" className="text-sm text-slate-700 dark:text-slate-300">Send copy via Email</label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    id="whatsapp" 
-                    checked={sendWhatsApp} 
+                  <input
+                    type="checkbox"
+                    id="whatsapp"
+                    checked={sendWhatsApp}
                     onChange={(e) => setSendWhatsApp(e.target.checked)}
                     className="rounded border-slate-300 dark:border-slate-600 text-green-600 focus:ring-green-500 dark:bg-slate-700"
                   />
@@ -209,9 +209,9 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
                   </label>
                 </div>
               </div>
-
-              <button 
-                type="submit" 
+*/}
+              <button
+                type="submit"
                 disabled={isSending}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-70"
               >
@@ -225,18 +225,18 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
         {/* History Section */}
         <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-             <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-                <p className="text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Total Sent</p>
-                <h3 className="text-2xl font-bold text-slate-800 dark:text-white">{history.length}</h3>
-             </div>
-             <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-                <p className="text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Total Reach</p>
-                <h3 className="text-2xl font-bold text-slate-800 dark:text-white">{history.reduce((acc, curr) => acc + curr.deliveryCount, 0)}</h3>
-             </div>
-             <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-                <p className="text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Avg Read Rate</p>
-                <h3 className="text-2xl font-bold text-green-600 dark:text-green-400">78%</h3>
-             </div>
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+              <p className="text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Total Sent</p>
+              <h3 className="text-2xl font-bold text-slate-800 dark:text-white">{history.length}</h3>
+            </div>
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+              <p className="text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Total Reach</p>
+              <h3 className="text-2xl font-bold text-slate-800 dark:text-white">{history.reduce((acc, curr) => acc + curr.deliveryCount, 0)}</h3>
+            </div>
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+              <p className="text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Avg Read Rate</p>
+              <h3 className="text-2xl font-bold text-green-600 dark:text-green-400">78%</h3>
+            </div>
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors">
@@ -260,7 +260,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
                       <td className="px-6 py-4 text-xs text-slate-500 dark:text-slate-400 font-medium whitespace-nowrap">
                         {new Date(log.sentAt).toLocaleDateString()}
                         <br />
-                        {new Date(log.sentAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                        {new Date(log.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </td>
                       <td className="px-6 py-4">
                         <p className="font-bold text-slate-800 dark:text-white text-sm">{log.title}</p>

@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { sendMessageToAI } from '../services/geminiService'; // <--- UPDATED IMPORT
+import { sendMessageToAI } from '../services/geminiService';
+import ReactMarkdown from 'react-markdown';
 
 const AIChatPage: React.FC = () => {
-  // Updated Initial Message to match the new persona
   const [messages, setMessages] = useState<{ role: 'user' | 'model'; text: string }[]>([
     { role: 'model', text: 'Hello! I am your Academic Assistant. I can explain concepts, guide you through lab manuals, or help with scheduling. I cannot provide direct exam answers, but I am happy to help you learn!' }
   ]);
@@ -27,7 +27,6 @@ const AIChatPage: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // <--- UPDATED FUNCTION CALL
       const response = await sendMessageToAI(userMsg);
       setMessages(prev => [...prev, { role: 'model', text: response }]);
     } catch (error) {
@@ -43,7 +42,6 @@ const AIChatPage: React.FC = () => {
       <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 flex justify-between items-center text-white">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-            {/* Changed Icon to Graduation Cap for Academic Vibe */}
             <i className="fa-solid fa-graduation-cap text-xl"></i>
           </div>
           <div>
@@ -57,14 +55,55 @@ const AIChatPage: React.FC = () => {
       <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] md:max-w-[70%] rounded-2xl px-6 py-4 shadow-sm text-base leading-relaxed ${msg.role === 'user'
+            <div className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-6 py-4 shadow-sm text-base leading-relaxed ${msg.role === 'user'
               ? 'bg-blue-600 text-white rounded-br-none'
               : 'bg-white text-slate-700 border border-slate-200 rounded-bl-none'
               }`}>
-              {msg.text}
+
+              {/* React Markdown handles the AI response formatting */}
+              {msg.role === 'model' ? (
+
+                /* FIX: Wrapped in a div instead of putting className directly on ReactMarkdown */
+                <div className="space-y-3 text-slate-700">
+                  <ReactMarkdown
+                    components={{
+                      p: ({ node, ...props }) => <p {...props} />,
+                      ul: ({ node, ...props }) => <ul className="list-disc pl-5 space-y-1" {...props} />,
+                      ol: ({ node, ...props }) => <ol className="list-decimal pl-5 space-y-1" {...props} />,
+                      li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                      strong: ({ node, ...props }) => <strong className="font-bold text-slate-800" {...props} />,
+                      h1: ({ node, ...props }) => <h1 className="text-xl font-bold mt-4 mb-2 text-slate-900" {...props} />,
+                      h2: ({ node, ...props }) => <h2 className="text-lg font-bold mt-4 mb-2 text-slate-900" {...props} />,
+                      h3: ({ node, ...props }) => <h3 className="text-md font-bold mt-3 mb-2 text-slate-900" {...props} />,
+                      code: ({ node, className, children, ...props }: any) => {
+                        const match = /language-(\w+)/.exec(className || '');
+                        return match ? (
+                          <pre className="bg-slate-800 text-slate-50 p-4 rounded-xl overflow-x-auto text-sm my-4 font-mono shadow-inner">
+                            <code className={className} {...props}>
+                              {children}
+                            </code>
+                          </pre>
+                        ) : (
+                          <code className="bg-blue-50 text-blue-600 border border-blue-100 px-1.5 py-0.5 rounded-md text-sm font-mono" {...props}>
+                            {children}
+                          </code>
+                        );
+                      }
+                    }}
+                  >
+                    {msg.text}
+                  </ReactMarkdown>
+                </div>
+
+              ) : (
+                /* User messages don't need markdown parsing */
+                <p>{msg.text}</p>
+              )}
+
             </div>
           </div>
         ))}
+
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-white text-slate-700 border border-slate-200 rounded-2xl rounded-bl-none px-6 py-4 shadow-sm flex items-center gap-2">
@@ -92,7 +131,7 @@ const AIChatPage: React.FC = () => {
           />
           <button
             onClick={handleSend}
-            disabled={isLoading}
+            disabled={isLoading || !input.trim()}
             className="bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
           >
             <i className="fa-solid fa-paper-plane text-lg"></i>

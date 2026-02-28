@@ -9,7 +9,8 @@ import {
    deleteTask
 } from '../../services/taskService';
 import { uploadAssignment } from '../../services/storageService';
-import { doc, getDoc } from 'firebase/firestore';
+// --- ALFRED'S UPGRADE: Added collection, addDoc, and Timestamp ---
+import { doc, getDoc, collection, addDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 
 interface Props {
@@ -81,7 +82,6 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
       setLoading(false);
    };
 
-   // --- FIX: Dynamic Modal Initialization ---
    const handleOpenCreateModal = () => {
       setNewTask({
          title: '',
@@ -114,16 +114,35 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
             uploadedUrl = result.url;
          }
 
+         // 1. Save the actual task
          await createTask({
             ...newTask as any,
             assignedById: user.id,
             assignedByName: user.name,
             status: 'OPEN',
-            course: activeSemester, // Save Semester so Students see it
+            course: activeSemester,
             subjectId: subjectId,
             subjectName: subjectName,
             attachmentUrl: uploadedUrl
          });
+
+         // --- ALFRED'S UPGRADE: Automated Bell Notification ---
+         try {
+            await addDoc(collection(db, 'notifications'), {
+               senderName: user.name, // The Faculty's name
+               targetGroup: 'ALL_STUDENTS', // Instantly alerts students
+               title: `New ${activeTab.replace('_', ' ')}`,
+               message: `A new ${activeTab.replace('_', ' ').toLowerCase()} "${newTask.title}" has been posted for ${subjectName}.`,
+               type: 'INFO',
+               sentAt: Timestamp.now(),
+               deliveryCount: 0,
+               readCount: 0
+            });
+         } catch (notifErr) {
+            // We catch this silently so the task still saves even if the notification fails
+            console.error("Failed to send automated notification:", notifErr);
+         }
+         // ----------------------------------------------------
 
          setIsCreateModalOpen(false);
          refreshTasks();
@@ -191,7 +210,6 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                   <button onClick={() => setActiveTab('PROJECT')} className={`flex-1 sm:flex-none px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'PROJECT' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>Projects</button>
                </div>
 
-               {/* FIX: Call handleOpenCreateModal instead of just setting state */}
                <button onClick={handleOpenCreateModal} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105 w-full sm:w-auto justify-center">
                   <i className="fa-solid fa-plus"></i> Create New
                </button>

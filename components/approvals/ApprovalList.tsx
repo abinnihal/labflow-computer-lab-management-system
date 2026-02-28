@@ -6,6 +6,7 @@ import TerminalLoader from '../ui/TerminalLoader';
 interface Props {
     targetRole: UserRole | 'ALL';
     department?: string;
+    currentUser: User;
     managedSemesters?: string[];
 }
 

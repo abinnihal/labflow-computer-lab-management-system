@@ -13,7 +13,6 @@ const NotificationCenter: React.FC<Props> = ({ user }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // --- ALFRED'S UPGRADE: Local Storage Read Receipts ---
-  // This tracks read status locally so we don't spam the database with read updates during the demo
   const [readNotifs, setReadNotifs] = useState<Set<string>>(() => {
     const saved = localStorage.getItem(`labflow_read_notifs_${user.id}`);
     return new Set(saved ? JSON.parse(saved) : []);
@@ -21,12 +20,24 @@ const NotificationCenter: React.FC<Props> = ({ user }) => {
 
   // Real-time Firestore Subscription
   useEffect(() => {
-    // 1. Figure out which messages this user is allowed to see
+    // 1. Figure out which messages this user is allowed to see (PRECISION TARGETING)
     const targets = ['ALL_USERS'];
-    if (user.role === 'STUDENT') targets.push('ALL_STUDENTS');
-    if (user.role === 'FACULTY') targets.push('ALL_FACULTY');
 
-    // Note: If you want to add specific class targeting (e.g. 'BCA_3'), you would push it to this array here!
+    if (user.role === 'STUDENT') {
+      targets.push('ALL_STUDENTS');
+      // Add the student's specific semester to the target list (e.g., "S6")
+      if (user.semester) {
+        targets.push(user.semester);
+      }
+    }
+
+    if (user.role === 'FACULTY') {
+      targets.push('ALL_FACULTY');
+    }
+
+    if (user.role === 'ADMIN') {
+      targets.push('ALL_ADMINS');
+    }
 
     // 2. Query the database
     const q = query(
@@ -40,6 +51,10 @@ const NotificationCenter: React.FC<Props> = ({ user }) => {
       const liveNotifs: any[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
+
+        // --- NEW FILTER: Ignore messages sent by the currently logged-in user ---
+        if (data.senderId === user.id) return;
+
         liveNotifs.push({
           id: doc.id,
           ...data,
@@ -53,7 +68,7 @@ const NotificationCenter: React.FC<Props> = ({ user }) => {
     });
 
     return () => unsubscribe();
-  }, [user.role]); // Re-run if a different user logs in
+  }, [user.role, user.semester, user.id]); // Updated dependency array to include all new filters
 
   // Click outside to close the dropdown
   useEffect(() => {
@@ -184,13 +199,6 @@ const NotificationCenter: React.FC<Props> = ({ user }) => {
             )}
           </div>
 
-          {/*
-          <div className="p-2 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 text-center">
-            <button className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-medium py-1">
-              View All History
-            </button>
-          </div>
-*/}
         </div>
       )}
     </div>

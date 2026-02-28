@@ -43,7 +43,7 @@ const TEMPLATES = [
 ];
 
 const NotificationManagerPage: React.FC<Props> = ({ user }) => {
-  const [history, setHistory] = useState<any[]>([]); // Using any[] temporarily to handle Firestore data mapping
+  const [history, setHistory] = useState<any[]>([]);
 
   // Form State
   const [target, setTarget] = useState('ALL_USERS');
@@ -58,7 +58,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
     refreshHistory();
   }, []);
 
-  // --- ALFRED'S UPGRADE: Fetching Real Data from Firebase ---
+  // --- ALFRED'S UPGRADE: Fetching & Filtering Real Data ---
   const refreshHistory = async () => {
     try {
       const q = query(collection(db, 'notifications'), orderBy('sentAt', 'desc'));
@@ -67,12 +67,15 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        loadedHistory.push({
-          id: doc.id,
-          ...data,
-          // Convert Firestore Timestamp back to a standard JavaScript Date
-          sentAt: data.sentAt?.toDate ? data.sentAt.toDate() : new Date()
-        });
+
+        // ONLY show manual Admin broadcasts, hide automated alerts from Faculty
+        if (data.category === 'GLOBAL_BROADCAST') {
+          loadedHistory.push({
+            id: doc.id,
+            ...data,
+            sentAt: data.sentAt?.toDate ? data.sentAt.toDate() : new Date()
+          });
+        }
       });
 
       setHistory(loadedHistory);
@@ -90,7 +93,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
     }
   };
 
-  // --- ALFRED'S UPGRADE: Writing Real Data to Firebase ---
+  // --- ALFRED'S UPGRADE: Safely using user.id ---
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !message) return;
@@ -98,17 +101,19 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
     setIsSending(true);
 
     try {
-      // Demo Magic: Generate realistic looking stats for the presentation
+      // Demo Stats
       const fakeDelivery = Math.floor(Math.random() * 80) + 20;
-      const fakeReads = Math.floor(fakeDelivery * 0.78); // Maintains that ~78% read rate look
+      const fakeReads = Math.floor(fakeDelivery * 0.78);
 
       await addDoc(collection(db, 'notifications'), {
-        senderName: user.name,
+        senderName: user.name || 'Administrator',
+        senderId: user.id || 'admin_system', // FIXED: Removed .uid to match types.ts
+        category: 'GLOBAL_BROADCAST',
         targetGroup: target,
         title: title,
         message: message,
         type: type,
-        sentAt: Timestamp.now(), // Secure server-side timestamp
+        sentAt: Timestamp.now(),
         deliveryCount: fakeDelivery,
         readCount: fakeReads
       });
@@ -116,8 +121,6 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
       setSuccessMsg('Notification broadcasted securely to database!');
       setTitle('');
       setMessage('');
-
-      // Instantly pull the new list so it appears in the table
       refreshHistory();
 
     } catch (error) {
@@ -144,8 +147,6 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-        {/* Compose Section */}
         <div className="lg:col-span-1">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 p-6 sticky top-6 transition-colors">
             <h2 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
@@ -172,10 +173,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Quick Template</label>
-                <select
-                  onChange={handleTemplateChange}
-                  className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-700 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
-                >
+                <select onChange={handleTemplateChange} className="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-700 dark:text-white text-sm focus:ring-2 focus:ring-blue-500">
                   <option value="">-- Select a Template --</option>
                   {TEMPLATES.map(t => <option key={t.label} value={t.label}>{t.label}</option>)}
                 </select>
@@ -185,12 +183,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Notification Type</label>
                 <div className="flex gap-2">
                   {['INFO', 'ALERT', 'REMINDER'].map(t => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setType(t as any)}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded border transition-colors ${type === t ? getTypeStyles(t) : 'bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600'}`}
-                    >
+                    <button key={t} type="button" onClick={() => setType(t as any)} className={`flex-1 py-1.5 text-xs font-bold rounded border transition-colors ${type === t ? getTypeStyles(t) : 'bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600'}`}>
                       {t}
                     </button>
                   ))}
@@ -199,32 +192,15 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Subject / Title</label>
-                <input
-                  type="text"
-                  required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Enter notification title"
-                  className="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                />
+                <input type="text" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Enter notification title" className="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Message Body</label>
-                <textarea
-                  required
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Type your message here..."
-                  className="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 h-32 focus:ring-2 focus:ring-blue-500 resize-none"
-                ></textarea>
+                <textarea required value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Type your message here..." className="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg px-3 py-2 h-32 focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
               </div>
 
-              <button
-                type="submit"
-                disabled={isSending}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-70"
-              >
+              <button type="submit" disabled={isSending} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-70">
                 {isSending ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <i className="fa-solid fa-paper-plane"></i>}
                 Send Broadcast
               </button>
@@ -232,7 +208,6 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
           </div>
         </div>
 
-        {/* History Section */}
         <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
@@ -288,7 +263,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
                             <span className="font-bold text-slate-700 dark:text-slate-300">{log.deliveryCount}</span>
                           </div>
                           <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
-                            <div className="bg-green-500 h-full" style={{ width: `${Math.min(100, (log.readCount / log.deliveryCount) * 100)}%` }}></div>
+                            <div className="bg-green-500 h-full" style={{ width: `${Math.min(100, (log.readCount / (log.deliveryCount || 1)) * 100)}%` }}></div>
                           </div>
                         </div>
                       </td>
@@ -298,7 +273,7 @@ const NotificationManagerPage: React.FC<Props> = ({ user }) => {
                     </tr>
                   ))}
                   {history.length === 0 && (
-                    <tr><td colSpan={5} className="p-8 text-center text-slate-400 dark:text-slate-500">No broadcast history found. Send a message to get started!</td></tr>
+                    <tr><td colSpan={5} className="p-8 text-center text-slate-400 dark:text-slate-500">No broadcast history found.</td></tr>
                   )}
                 </tbody>
               </table>

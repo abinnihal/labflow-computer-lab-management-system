@@ -126,11 +126,13 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
             attachmentUrl: uploadedUrl
          });
 
-         // --- ALFRED'S UPGRADE: Automated Bell Notification ---
+         // --- ALFRED'S UPGRADE: Targeted Bell Notification ---
          try {
             await addDoc(collection(db, 'notifications'), {
-               senderName: user.name, // The Faculty's name
-               targetGroup: 'ALL_STUDENTS', // Instantly alerts students
+               senderName: user.name,
+               senderId: user.id, // NEW: Helps the bell icon ignore the sender's own messages
+               category: 'TASK_ALERT', // NEW: Tags this so the Admin panel can filter it out
+               targetGroup: activeSemester || 'ALL_STUDENTS', // NEW: Targets the specific class!
                title: `New ${activeTab.replace('_', ' ')}`,
                message: `A new ${activeTab.replace('_', ' ').toLowerCase()} "${newTask.title}" has been posted for ${subjectName}.`,
                type: 'INFO',
@@ -139,7 +141,6 @@ const FacultyTasksPage: React.FC<Props> = ({ user }) => {
                readCount: 0
             });
          } catch (notifErr) {
-            // We catch this silently so the task still saves even if the notification fails
             console.error("Failed to send automated notification:", notifErr);
          }
          // ----------------------------------------------------

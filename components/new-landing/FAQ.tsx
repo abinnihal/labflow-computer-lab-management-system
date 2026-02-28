@@ -3,12 +3,26 @@ import { Plus, Minus } from 'lucide-react';
 import { FaqItem } from './types';
 
 const faqData: FaqItem[] = [
-    { question: "How does the automated scheduling work?", answer: "The system uses a conflict-checker algorithm that cross-references faculty availability, lab capacity, and student timetables to book slots automatically without overlap." },
-    { question: "What is the AI problem-solving window?", answer: "An integrated chat interface powered by OpenAI/Gemini that allows students to ask code-related doubts or troubleshooting questions directly within the lab environment." },
-    { question: "How is attendance tracked?", answer: "Attendance is logged via timestamped check-in/check-out actions within the student module, providing real-time data to faculty." },
-    { question: "Does it support external calendar integration?", answer: "Yes, the system fully integrates with Google Calendar and Outlook API to sync schedules across devices." },
-    { question: "What notification channels are supported?", answer: "Global and specific notifications are sent via WhatsApp API and Email/Calendar invites to ensure instant updates." },
-    { question: "Is the system scalable for large universities?", answer: "Yes, built on Node.js and scalable databases (MongoDB/PostgreSQL), it can handle thousands of concurrent users and complex scheduling patterns." },
+    {
+        question: "What is the underlying architecture of LabFlow?",
+        answer: "LabFlow is built as a modern Single Page Application (SPA) using React and Tailwind CSS. It relies on Firebase for secure, real-time NoSQL database management (Firestore) and authentication, with Cloudinary handling secure media uploads."
+    },
+    {
+        question: "How is student attendance verified and tracked?",
+        answer: "LabFlow utilizes a highly secure, timestamped digital check-in system. It leverages the device camera for selfie-based verification and logs the exact check-in time directly to the database for automated faculty review."
+    },
+    {
+        question: "What is the Academic Lab Assistant?",
+        answer: "It is an integrated AI chat interface powered by the Google Gemini API. It helps students understand programming concepts, debug code, and navigate lab manuals using formatted Markdown, acting as a 24/7 learning guide."
+    },
+    {
+        question: "How does the lab booking system prevent conflicts?",
+        answer: "The system uses a real-time booking engine powered by Firestore. It actively cross-references active lab schedules, faculty approvals, and user roles to prevent overlapping reservations and ensure efficient resource allocation."
+    },
+    {
+        question: "How do users receive system updates and alerts?",
+        answer: "The platform features a centralized, real-time in-app Notification Center. Administrators and faculty can broadcast global alerts, task deadlines, and booking status updates instantly to specific user roles."
+    },
 ];
 
 const FAQ: React.FC = () => {

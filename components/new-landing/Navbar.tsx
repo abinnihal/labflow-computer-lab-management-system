@@ -33,11 +33,11 @@ const Navbar: React.FC = () => {
                     <span className="text-white">Labflow</span>
                 </div>
 
-                {/* Desktop Links */}
+                {/* Desktop Links 
                 <div className="hidden lg:flex items-center gap-8 text-sm font-medium text-gray-300">
                     <a href="#" className="hover:text-brand-green transition-colors">About</a>
                     <a href="#" className="hover:text-brand-green transition-colors">Contact</a>
-                </div>
+                </div> */}
 
                 {/* Actions */}
                 <div className="hidden lg:flex items-center gap-6">

@@ -4,52 +4,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Labflow - Lab Scheduling System</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-          },
-          colors: {
-            slate: {
-              850: '#1e293b', // Custom dark shade if needed
-              950: '#020617',
-            },
-            brand: {
-              green: '#2563eb', // Changed to Royal Blue for a mature, professional look
-              dark: '#020617',  // Slate 950
-              card: '#0f172a',  // Slate 900
-              border: '#1e293b', // Slate 800
-              accent: '#3b82f6'  // Blue 500
-            }
-          },
-          animation: {
-            'marquee': 'marquee 40s linear infinite',
-            'blob': 'blob 7s infinite',
-          },
-          keyframes: {
-            marquee: {
-              '0%': { transform: 'translateX(0%)' },
-              '100%': { transform: 'translateX(-50%)' },
-            },
-            blob: {
-              '0%': { transform: 'translate(0px, 0px) scale(1)' },
-              '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
-              '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
-              '100%': { transform: 'translate(0px, 0px) scale(1)' },
-            }
-          }
-        }
-      }
-    }
-  </script>
+  <title>Labflow</title>
+  <link rel="icon" type="image/png" href="/logo.png" />
+
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://apis.google.com/js/api.js" async defer></script>
+
   <style>
     :root {
       --transDur: 0.3s;
@@ -121,7 +82,7 @@
       }
     }
 
-    /* Jumping Dots Loader CSS (From Uiverse.io by coding-masala) */
+    /* Jumping Dots Loader CSS */
     .loader {
       display: flex;
       align-items: center;
@@ -144,7 +105,6 @@
 
     .dark .box:nth-child(1) {
       background-color: #94a3b8;
-      /* Light slate for dark mode */
     }
 
     .box:nth-child(2) {
@@ -154,7 +114,6 @@
 
     .dark .box:nth-child(2) {
       background-color: #475569;
-      /* Darker slate for dark mode */
     }
 
     .box:nth-child(3) {
@@ -198,7 +157,6 @@
       cursor: pointer;
       box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
       border: 1px solid #e2e8f0;
-      /* Added subtle border for light mode visibility */
       line-height: 1;
       position: relative;
       overflow: hidden;
@@ -207,15 +165,12 @@
 
     .toggle:hover {
       transform: scale(1.05);
-      /* Added hover interaction */
     }
 
     /* Dark mode override for toggle background */
     .dark .toggle {
       background-color: #334155;
-      /* Slate 700 - Better contrast on dark headers */
       border-color: #475569;
-      /* Slate 600 */
       box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
     }
 
@@ -236,16 +191,13 @@
     .icon--moon {
       transition-delay: 200ms;
       color: #475569;
-      /* Slate 600 */
     }
 
     .icon--sun {
       transform: scale(0);
       color: #fbbf24;
-      /* Amber 400 */
     }
 
-    /* Using a class selector for checked state to avoid ID conflicts */
     .switch-input:checked+.icon--moon {
       transform: rotate(360deg) scale(0);
     }
@@ -255,10 +207,9 @@
       transform: scale(1) rotate(360deg);
     }
 
-    /* Notification Icon Swap Style (From Uiverse.io by elijahgummer) */
+    /* Notification Icon Swap Style */
     .notification-icon-uiverse {
       font-size: 24px;
-      /* Scaled down from 48px to fit header */
       cursor: pointer;
       user-select: none;
       display: inline-block;

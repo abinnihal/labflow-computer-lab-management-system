@@ -51,15 +51,13 @@ const CalendarView: React.FC<Props> = ({ user }) => {
       // ---------------------------------------------------------
       // 1. DETERMINE FILTER CONTEXT
       // ---------------------------------------------------------
-      let filter = null;
+      let filter: { name: string, course: string, semester: string } | null = null;
 
       if (user?.role === UserRole.ADMIN) {
-        // Admin: Only filter if dropdowns are selected
         if (adminFilter.course && adminFilter.semester) {
           filter = { ...adminFilter, name: 'Master Schedule' };
         }
       } else if (user?.role === UserRole.STUDENT) {
-        // Student: Always default to their Course/Sem
         if (user.course && user.semester) {
           filter = {
             name: 'My Class',
@@ -69,15 +67,14 @@ const CalendarView: React.FC<Props> = ({ user }) => {
           setActiveContext(filter);
         }
       } else {
-        // Faculty: Use LocalStorage Context
         const activeSubjectId = localStorage.getItem('activeSubjectId');
         if (activeSubjectId) {
           const subDoc = await getDoc(doc(db, 'subjects', activeSubjectId));
           if (subDoc.exists()) {
             filter = {
               name: subDoc.data().name,
-              course: subDoc.data().course,
-              semester: subDoc.data().semester
+              course: subDoc.data().course || 'BCA',
+              semester: subDoc.data().semester || 'S1'
             };
             setActiveContext(filter);
           }
@@ -87,40 +84,31 @@ const CalendarView: React.FC<Props> = ({ user }) => {
       }
 
       // ---------------------------------------------------------
-      // 2. FETCH & FILTER BOOKINGS (FIXED LOGIC)
+      // 2. FETCH & FILTER BOOKINGS
       // ---------------------------------------------------------
       const systemBookings = await getAllBookings();
       const mappedBookings = systemBookings
         .filter(b => {
-          // Cast status to string to prevent TS error
           const status = b.status as string;
           if (status === 'REJECTED' || status === 'CANCELLED') return false;
 
-          // RULE 1: If I am the owner, ALWAYS show my booking (Ad-Hoc or Class)
+          // Admin sees all approved bookings
+          if (user?.role === UserRole.ADMIN) return true;
+
           if (user && b.userId === user.id) return true;
 
-          // RULE 2: If I am a Student, show bookings for MY CLASS (Case-Insensitive Check)
           if (user?.role === UserRole.STUDENT) {
             const bCourse = b.course?.toLowerCase().trim() || '';
             const bSem = b.semester?.toLowerCase().trim() || '';
             const uCourse = user.course?.toLowerCase().trim() || '';
             const uSem = user.semester?.toLowerCase().trim() || '';
-
-            // If the booking matches my class details, show it!
-            // Note: We check if bCourse exists because some old bookings might be empty
-            if (bCourse && bSem && bCourse === uCourse && bSem === uSem) {
-              return true;
-            }
+            if (bCourse && bSem && bCourse === uCourse && bSem === uSem) return true;
           }
 
-          // RULE 3: If a filter is active (e.g. Admin/Faculty View)
           if (filter) {
-            // Basic match
             if (b.course === filter.course && b.semester === filter.semester) return true;
             return false;
           }
-
-          // RULE 4: No filter (Global Admin/Faculty View) -> Show Everything
           return true;
         })
         .map(b => ({
@@ -137,15 +125,34 @@ const CalendarView: React.FC<Props> = ({ user }) => {
       allEvents.push(...mappedBookings);
 
       // ---------------------------------------------------------
-      // 3. FETCH MASTER TIMETABLE (Only if Filter is Active)
+      // 3. FETCH MASTER TIMETABLE (Admin vs Faculty Logic)
       // ---------------------------------------------------------
-      if (filter) {
-        const timeTableSlots = await getClassSchedule(filter.course, filter.semester);
-        const generatedClasses = generateRecurringEvents(timeTableSlots, currentDate);
+
+      // ADMIN: If no filter is active, fetch EVERYTHING for a full calendar
+      if (user?.role === UserRole.ADMIN && !filter) {
+        const allSlotsPromises = COURSES.flatMap(c =>
+          SEMESTERS.slice(0, 6).map(s => getClassSchedule(c, s))
+        );
+        const allResults = await Promise.all(allSlotsPromises);
+        const flattenedSlots = allResults.flat();
+        allEvents.push(...generateRecurringEvents(flattenedSlots, currentDate));
+      }
+      // FILTERED (Student/Faculty/Admin with dropdowns)
+      else if (filter) {
+        const rawTimeTableSlots = await getClassSchedule(filter.course, filter.semester);
+        let filteredSlots = rawTimeTableSlots;
+
+        // ONLY Faculty should have their recurring classes hidden if the subject doesn't match
+        if (user?.role === UserRole.FACULTY && filter.name !== 'Master Schedule' && filter.name !== 'My Class') {
+          filteredSlots = rawTimeTableSlots.filter(
+            slot => slot.subjectName.toLowerCase().trim() === filter!.name.toLowerCase().trim()
+          );
+        }
+
+        const generatedClasses = generateRecurringEvents(filteredSlots, currentDate);
         allEvents.push(...generatedClasses);
       }
 
-      // Sort chronological
       allEvents.sort((a, b) => {
         const dateA = new Date(a.start.dateTime || a.start.date || '');
         const dateB = new Date(b.start.dateTime || b.start.date || '');

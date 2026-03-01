@@ -17,6 +17,7 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip
 } from 'recharts';
+
 interface Props {
   user: User;
 }
@@ -135,9 +136,9 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
               type: 'PROJECT',
               status: 'OPEN',
               assignedById: 'fac1',
-              assignedBy: 'Dr. Sarah Connor', // Added missing property
+              assignedBy: 'Dr. Sarah Connor',
               subjectId: 'sub1',
-              subjectName: 'Python Programming', // Added missing property
+              subjectName: 'Python Programming',
               course: 'BCA',
               priority: 'MEDIUM',
               createdAt: new Date().toISOString()
@@ -150,14 +151,14 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
               type: 'ASSIGNMENT',
               status: 'OPEN',
               assignedById: 'fac2',
-              assignedBy: 'Prof. Alan Turing', // Added missing property
+              assignedBy: 'Prof. Alan Turing',
               subjectId: 'sub2',
-              subjectName: 'Data Communications', // Added missing property
+              subjectName: 'Data Communications',
               course: 'BCA',
               priority: 'MEDIUM',
               createdAt: new Date().toISOString()
             }
-          ];
+          ] as any; // Cast to avoid strict TS interface checks on mock data
         }
         setPendingTasks(pending);
       } catch (error) {
@@ -179,8 +180,8 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
                 code: 'BCA-501',
                 semester: semester,
                 facultyName: 'Dr. Sarah Connor',
-                batchId: 'mock_batch_1', // Added missing property
-                facultyId: 'mock_fac_1'   // Added missing property
+                batchId: 'mock_batch_1',
+                facultyId: 'mock_fac_1'
               },
               {
                 id: 's2',
@@ -188,8 +189,8 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
                 code: 'BCA-502',
                 semester: semester,
                 facultyName: 'Prof. Alan Turing',
-                batchId: 'mock_batch_1', // Added missing property
-                facultyId: 'mock_fac_2'   // Added missing property
+                batchId: 'mock_batch_1',
+                facultyId: 'mock_fac_2'
               },
               {
                 id: 's3',
@@ -197,8 +198,8 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
                 code: 'BCA-503',
                 semester: semester,
                 facultyName: 'Dr. Grace Hopper',
-                batchId: 'mock_batch_1', // Added missing property
-                facultyId: 'mock_fac_3'   // Added missing property
+                batchId: 'mock_batch_1',
+                facultyId: 'mock_fac_3'
               }
             ];
           }
@@ -232,10 +233,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
               if (b.status !== 'APPROVED') return false;
 
               // 2. Check ownership/target
-              // Is it MY booking?
               const isForMe = b.userId === user.id;
-
-              // Is it for MY CLASS? (Course/Sem match)
               const isForBatch = (b.course === studentCourse && b.semester === studentSemester);
 
               return isForMe || isForBatch;
@@ -250,7 +248,7 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
                 endTime: new Date(activeBooking.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
                 course: studentCourse,
                 semester: studentSemester,
-                dayOfWeek: 'Monday' as any, // Cast to any to avoid TS literal type error on dynamic generation
+                dayOfWeek: 'Monday' as any,
                 subjectId: 'booking',
                 facultyId: activeBooking.userId,
                 facultyName: activeBooking.userName,
@@ -280,7 +278,6 @@ const StudentDashboard: React.FC<Props> = ({ user }) => {
     };
 
     fetchDashboardData();
-
   }, [user.id, refreshTrigger, user.semester, user.course]);
 
   const handleToggleAttendance = async () => {
